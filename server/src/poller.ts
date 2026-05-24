@@ -33,7 +33,7 @@ export function computeDerived(
   const allTime = sum(buckets.daily);
   const activeBlock = buckets.blocks.find((b) => b.isActive) ?? null;
   const activeSessionCount = buckets.session.filter((s) => {
-    const t = s.metadata.lastActivity;
+    const t = s.metadata?.lastActivity;
     if (!t) return false;
     const ts = Date.parse(t);
     return Number.isFinite(ts) && (now.getTime() - ts) <= ACTIVE_SESSION_WINDOW_MS;

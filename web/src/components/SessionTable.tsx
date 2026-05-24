@@ -24,7 +24,7 @@ export function SessionTable() {
       r = r.filter((s) => s.period.toLowerCase().includes(lq) || s.modelsUsed.some((m) => m.toLowerCase().includes(lq)));
     }
     const get = (x: typeof r[number]) => {
-      if (sortKey === "lastActivity") return x.metadata.lastActivity ?? "";
+      if (sortKey === "lastActivity") return x.metadata?.lastActivity ?? "";
       const v = (x as any)[sortKey];
       return typeof v === "number" ? v : String(v ?? "");
     };
@@ -84,7 +84,7 @@ export function SessionTable() {
                 <TD>{s.agent}</TD>
                 <TD className="font-mono tabular-nums">{formatNumber(s.totalTokens)}</TD>
                 <TD className="font-mono tabular-nums">{formatCost(s.totalCost)}</TD>
-                <TD className="text-xs text-muted-foreground">{s.metadata.lastActivity ?? "—"}</TD>
+                <TD className="text-xs text-muted-foreground">{s.metadata?.lastActivity ?? "—"}</TD>
                 <TD className="text-xs text-muted-foreground truncate max-w-[200px]" title={s.modelsUsed.join(", ")}>{s.modelsUsed.join(", ")}</TD>
               </TR>
             ))}

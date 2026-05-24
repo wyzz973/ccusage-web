@@ -44,6 +44,13 @@ describe("computeDerived", () => {
     const d = computeDerived({ daily: [], weekly: [], monthly: [], session: [recent, stale], blocks: [] }, now);
     expect(d.activeSessionCount).toBe(1);
   });
+
+  it("tolerates session records without metadata field", () => {
+    const noMeta = { ...rec("s1", 0, 0) };
+    delete (noMeta as Partial<typeof noMeta>).metadata;
+    const d = computeDerived({ daily: [], weekly: [], monthly: [], session: [noMeta], blocks: [] }, now);
+    expect(d.activeSessionCount).toBe(0);
+  });
 });
 
 describe("poller", () => {

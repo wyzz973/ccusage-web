@@ -9,7 +9,7 @@ export type UsageRecord = {
   cacheReadTokens: number;
   modelsUsed: string[];
   modelBreakdowns: ModelBreakdown[];
-  metadata: { agents?: string[]; lastActivity?: string };
+  metadata?: { agents?: string[]; lastActivity?: string };
 };
 
 export type ModelBreakdown = {
