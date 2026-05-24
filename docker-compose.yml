@@ -1,0 +1,21 @@
+services:
+  ccusage-web:
+    build: .
+    image: ccusage-web:latest
+    container_name: ccusage-web
+    restart: unless-stopped
+    ports:
+      - "47821:47821"
+    environment:
+      - PORT=47821
+      - POLL_INTERVAL_MS=2000
+      - CCUSAGE_TIMEOUT_MS=30000
+      - CCUSAGE_AUTO_UPDATE_INTERVAL_MS=86400000
+      - TZ=Asia/Shanghai
+      - LOG_LEVEL=info
+    volumes:
+      # Mount whichever agent log dirs you actually use; comment the rest.
+      - ${HOME}/.claude:/root/.claude:ro
+      - ${HOME}/.codex:/root/.codex:ro
+      - ${HOME}/.gemini:/root/.gemini:ro
+      - ${HOME}/.config/copilot:/root/.config/copilot:ro
