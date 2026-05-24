@@ -1,3 +1,5 @@
+import { Dashboard } from "@/pages/Dashboard";
+
 export default function App() {
-  return <div>ccusage-web (stub)</div>;
+  return <Dashboard />;
 }
