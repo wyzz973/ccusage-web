@@ -32,8 +32,8 @@ export type Block = {
   totalTokens: number;
   entries: number;
   models: string[];
-  burnRate: number | null;
-  projection: unknown | null;
+  burnRate: { costPerHour: number; tokensPerMinute: number; tokensPerMinuteForIndicator: number } | null;
+  projection: { remainingMinutes: number; totalCost: number; totalTokens: number } | null;
   tokenCounts: {
     inputTokens: number;
     outputTokens: number;

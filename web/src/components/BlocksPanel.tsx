@@ -35,8 +35,15 @@ export function BlocksPanel() {
               <span className="font-mono tabular-nums">{formatCost(active.costUSD)}</span>
               <span className="font-mono tabular-nums text-muted-foreground">{formatNumber(active.totalTokens)} tok</span>
             </div>
-            {active.burnRate !== null && (
-              <div className="text-xs text-muted-foreground">Burn rate: {formatNumber(active.burnRate)} tok/min</div>
+            {active.burnRate && (
+              <div className="text-xs text-muted-foreground">
+                Burn rate: {formatNumber(active.burnRate.tokensPerMinute)} tok/min · {formatCost(active.burnRate.costPerHour)}/h
+              </div>
+            )}
+            {active.projection && (
+              <div className="text-xs text-muted-foreground">
+                Projected end: {formatCost(active.projection.totalCost)} · {formatNumber(active.projection.totalTokens)} tok ({active.projection.remainingMinutes}min left)
+              </div>
             )}
           </div>
         ) : (
