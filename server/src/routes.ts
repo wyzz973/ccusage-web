@@ -1,6 +1,6 @@
 import { Router, type Response } from "express";
-import type { SnapshotStore } from "./snapshot-store";
-import type { SseHub } from "./sse-hub";
+import type { SnapshotStore } from "./snapshot-store.js";
+import type { SseHub } from "./sse-hub.js";
 
 export interface RoutesDeps {
   store: SnapshotStore;

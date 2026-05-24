@@ -1,4 +1,4 @@
-import type { Snapshot, HealthInfo } from "./types";
+import type { Snapshot, HealthInfo } from "./types.js";
 
 export type Listener = (snap: Snapshot) => void;
 

@@ -1,6 +1,6 @@
 import pLimit from "p-limit";
-import type { Snapshot, UsageRecord, Block, Derived } from "./types";
-import type { SnapshotStore } from "./snapshot-store";
+import type { Snapshot, UsageRecord, Block, Derived } from "./types.js";
+import type { SnapshotStore } from "./snapshot-store.js";
 
 export interface PollerDeps {
   store: SnapshotStore;
@@ -60,11 +60,11 @@ export function createPoller(deps: PollerDeps): Poller {
         cmds.map((cmd) => limit(() => deps.runCcusage<Record<string, unknown[]>>(cmd))),
       );
       const buckets = {
-        daily:   (results[0] as any)[RESPONSE_KEY.daily]   as UsageRecord[],
-        weekly:  (results[1] as any)[RESPONSE_KEY.weekly]  as UsageRecord[],
-        monthly: (results[2] as any)[RESPONSE_KEY.monthly] as UsageRecord[],
-        session: (results[3] as any)[RESPONSE_KEY.session] as UsageRecord[],
-        blocks:  (results[4] as any)[RESPONSE_KEY.blocks]  as Block[],
+        daily:   (results[0] as any)["daily"]   as UsageRecord[],
+        weekly:  (results[1] as any)["weekly"]  as UsageRecord[],
+        monthly: (results[2] as any)["monthly"] as UsageRecord[],
+        session: (results[3] as any)["session"] as UsageRecord[],
+        blocks:  (results[4] as any)["blocks"]  as Block[],
       };
       const version = await deps.getVersion().catch(() => "unknown");
       const generatedAt = now().toISOString();
