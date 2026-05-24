@@ -6,3 +6,6 @@ dist/
 .env.*
 coverage/
 .vite/
+*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts
