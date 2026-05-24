@@ -1,0 +1,11 @@
+{
+  "name": "ccusage-web",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["server", "web"],
+  "scripts": {
+    "build": "npm run build --workspace=web && npm run build --workspace=server",
+    "test": "npm test --workspaces --if-present",
+    "dev": "echo 'Use npm run dev --workspace=server and npm run dev --workspace=web in two terminals'"
+  }
+}
