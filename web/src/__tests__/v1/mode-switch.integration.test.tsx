@@ -76,20 +76,24 @@ beforeEach(() => {
   useUsageStore.getState().setSnapshot(augmentedSnapshot());
 });
 
+// R2.1: Both dashboards are now React.lazy chunks for bundle discipline,
+// so the first render shows the Suspense fallback. Tests must await the
+// lazy chunk to resolve via `findByTestId` / `findByText` (which retry
+// until the timeout) instead of the sync `getByTestId`.
 describe("App mode switch", () => {
-  it("renders the classic Dashboard when mode='classic'", () => {
+  it("renders the classic Dashboard when mode='classic'", async () => {
     render(<App modeOverride="classic" />);
-    // Classic header has plain title + Refresh button. No view toggle yet.
-    expect(screen.getByText("ccusage")).toBeInTheDocument();
+    // findByText awaits the lazy Dashboard to resolve.
+    expect(await screen.findByText("ccusage")).toBeInTheDocument();
     expect(screen.queryByTestId("dashboard-v1")).toBeNull();
     expect(screen.queryByTestId("view-toggle")).toBeNull();
     expect(screen.queryByTestId("driver-strip")).toBeNull();
     expect(screen.queryByTestId("driver-strip-empty")).toBeNull();
   });
 
-  it("renders DashboardV1 when mode='v1' with the new v1 bands present", () => {
+  it("renders DashboardV1 when mode='v1' with the new v1 bands present", async () => {
     render(<App modeOverride="v1" />);
-    expect(screen.getByTestId("dashboard-v1")).toBeInTheDocument();
+    expect(await screen.findByTestId("dashboard-v1")).toBeInTheDocument();
     expect(screen.getByTestId("view-toggle")).toBeInTheDocument();
     expect(screen.getAllByTestId("metric-card-v1").length).toBeGreaterThan(0);
     // Driver strip should pick up the augmented snapshot's drivers.
@@ -97,9 +101,9 @@ describe("App mode switch", () => {
     expect(screen.getByTestId("driver-segment-agent")).toBeInTheDocument();
   });
 
-  it("v1 renders the trend chart, donut, block strip, and session table", () => {
+  it("v1 renders the trend chart, donut, block strip, and session table", async () => {
     render(<App modeOverride="v1" />);
-    expect(screen.getByTestId("trend-chart-v1")).toBeInTheDocument();
+    expect(await screen.findByTestId("trend-chart-v1")).toBeInTheDocument();
     expect(screen.getByTestId("model-donut-v1")).toBeInTheDocument();
     expect(screen.getByTestId("block-history-strip")).toBeInTheDocument();
     expect(screen.getByTestId("session-table-v1")).toBeInTheDocument();
@@ -107,10 +111,10 @@ describe("App mode switch", () => {
 });
 
 describe("Classic dashboard still works against augmented snapshot (addendum #2)", () => {
-  it("renders the same numbers and does not throw when extra derived fields are present", () => {
+  it("renders the same numbers and does not throw when extra derived fields are present", async () => {
     render(<App modeOverride="classic" />);
-    // Classic MetricCards exist (testid is shared from the original component).
-    const cards = screen.getAllByTestId("metric-card");
+    // findAllByTestId awaits the lazy classic Dashboard chunk to resolve.
+    const cards = await screen.findAllByTestId("metric-card");
     expect(cards.length).toBeGreaterThanOrEqual(4);
     // The Today card shows the token count from derived.today.tokens (1500).
     expect(cards[0]?.textContent).toMatch(/1,500/);

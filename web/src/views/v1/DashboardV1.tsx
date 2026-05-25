@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { Suspense, lazy, useEffect, useMemo } from "react";
 import { RefreshCw } from "lucide-react";
 import { LiveIndicator } from "@/components/LiveIndicator";
 import { useUsageStore } from "@/store/usage-store";
@@ -12,20 +12,45 @@ import { TrendChartV1 } from "./components/TrendChartV1";
 import { ModelDonutV1 } from "./components/ModelDonutV1";
 import { BlockHistoryStrip } from "./components/BlockHistoryStrip";
 import { SessionTableV1 } from "./components/SessionTableV1";
-import { DateRangePickerV1 } from "./components/DateRangePickerV1";
-import { SettingsPopoverV1 } from "./components/SettingsPopoverV1";
 import { ModeBadgesV1 } from "./components/ModeBadgesV1";
 import { ProjectsPanelV1 } from "./components/ProjectsPanelV1";
-import { ProjectsDialogV1 } from "./components/ProjectsDialogV1";
 import { CacheSavingsPanelV1 } from "./components/CacheSavingsPanelV1";
 import {
   selectKpis, selectAgentBreakdown, selectDailySparkSeries,
   selectTodayDriversFallback, selectDailyInRange, selectSessionsInRange,
 } from "./data/selectors";
 import { useV1Store } from "./data/v1-store";
-import { HistoryV1 } from "./pages/HistoryV1";
 import { AGENT_COLORS, AGENT_LABEL, SEMANTIC, toAgentKey } from "./lib/agent-colors";
+import type { Derived } from "@/types";
 import "./style.css";
+
+// R2.1 — lazy chunks (spec-v2 §1.3 bundle discipline). Everything that
+// drags in Radix Popover or Dialog is moved off the initial-paint
+// critical path. The header trigger buttons render immediately;
+// the popover/dialog content hydrates in async on first interaction.
+const HistoryV1 = lazy(() => import("./pages/HistoryV1").then((m) => ({ default: m.HistoryV1 })));
+const ProjectsDialogV1Lazy = lazy(() => import("./components/ProjectsDialogV1").then((m) => ({ default: m.ProjectsDialogV1 })));
+const DateRangePickerV1 = lazy(() => import("./components/DateRangePickerV1").then((m) => ({ default: m.DateRangePickerV1 })));
+const SettingsPopoverV1 = lazy(() => import("./components/SettingsPopoverV1").then((m) => ({ default: m.SettingsPopoverV1 })));
+
+type ProjectList = NonNullable<Derived["projects"]>;
+
+function ProjectsDialogMount({ projects }: { projects: ProjectList }): JSX.Element | null {
+  const open = useV1Store((s) => s.projectsDialogOpen);
+  if (!open) return null;
+  return <ProjectsDialogV1Lazy projects={projects} />;
+}
+
+/** Same shape as the real header button so the lazy hydration doesn't jank. */
+function HeaderButtonSkeleton({ width, label }: { width: string; label: string }): JSX.Element {
+  return (
+    <span
+      aria-hidden="true"
+      className={`inline-flex h-8 ${width} animate-pulse items-center rounded-md border border-border bg-muted/30`}
+      data-testid={`header-skel-${label.toLowerCase()}`}
+    />
+  );
+}
 
 function localTodayKey(): string {
   const now = new Date();
@@ -118,7 +143,9 @@ export function DashboardV1({ skipLiveWiring = false, routeOverride }: Dashboard
             </a>
           </div>
         </header>
-        <HistoryV1 blocks={blocks} />
+        <Suspense fallback={<div className="text-sm text-muted-foreground py-12 text-center">Loading history…</div>}>
+          <HistoryV1 blocks={blocks} />
+        </Suspense>
       </div>
     );
   }
@@ -133,7 +160,9 @@ export function DashboardV1({ skipLiveWiring = false, routeOverride }: Dashboard
         <div className="flex items-center gap-3 text-xs">
           <LiveIndicator />
           <ModeBadgesV1 />
-          <DateRangePickerV1 />
+          <Suspense fallback={<HeaderButtonSkeleton width="w-20" label="Range" />}>
+            <DateRangePickerV1 />
+          </Suspense>
           <button
             type="button"
             className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted/40"
@@ -142,7 +171,9 @@ export function DashboardV1({ skipLiveWiring = false, routeOverride }: Dashboard
           >
             <RefreshCw className="h-3 w-3" /> Refresh
           </button>
-          <SettingsPopoverV1 />
+          <Suspense fallback={<HeaderButtonSkeleton width="w-9" label="Settings" />}>
+            <SettingsPopoverV1 />
+          </Suspense>
         </div>
       </header>
 
@@ -233,7 +264,11 @@ export function DashboardV1({ skipLiveWiring = false, routeOverride }: Dashboard
 
       <SessionTableV1 records={inRangeSessions} />
 
-      <ProjectsDialogV1 projects={projects} />
+      {/* R2.1 — ProjectsDialog is only mounted when the user opens it, which
+          keeps its Radix Dialog chunk off the initial-paint critical path. */}
+      <Suspense fallback={null}>
+        <ProjectsDialogMount projects={projects} />
+      </Suspense>
 
       {snap && (
         <footer className="text-[10px] text-muted-foreground text-right">
