@@ -20,9 +20,9 @@ describe("DriverStrip", () => {
         totalCostUSD={50}
       />,
     );
-    expect(screen.getByTestId("driver-agent")).toBeInTheDocument();
-    expect(screen.getByTestId("driver-model")).toBeInTheDocument();
-    expect(screen.getByTestId("driver-project")).toBeInTheDocument();
+    expect(screen.getByTestId("driver-segment-agent")).toBeInTheDocument();
+    expect(screen.getByTestId("driver-segment-model")).toBeInTheDocument();
+    expect(screen.getByTestId("driver-segment-project")).toBeInTheDocument();
     expect(screen.getByText("Claude")).toBeInTheDocument(); // labelized agent name
     expect(screen.getByText("opus-4-7")).toBeInTheDocument();
   });
@@ -35,7 +35,7 @@ describe("DriverStrip", () => {
         totalCostUSD={5}
       />,
     );
-    expect(screen.queryByTestId("driver-project")).toBeNull();
+    expect(screen.queryByTestId("driver-segment-project")).toBeNull();
   });
 
   it("clicking the agent segment dispatches addFilter to the v1 store", () => {
@@ -45,7 +45,7 @@ describe("DriverStrip", () => {
         totalCostUSD={50}
       />,
     );
-    fireEvent.click(screen.getByTestId("driver-agent"));
+    fireEvent.click(screen.getByTestId("driver-segment-agent"));
     expect(useV1Store.getState().filters).toEqual([{ kind: "agent", value: "claude" }]);
   });
 });

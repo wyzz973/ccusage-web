@@ -68,7 +68,7 @@ export function DriverStrip(props: DriverStripProps): JSX.Element {
                 onClick={() => addFilter({ kind: s.kind, value: s.kind === "agent" ? toAgentKey(s.seg.name) : s.seg.name })}
                 className="inline-flex items-center gap-2 rounded-md hover:bg-muted/40 -mx-1.5 px-1.5 py-0.5"
                 aria-label={`Filter by ${s.kind}: ${label}`}
-                data-testid={`driver-${s.kind}`}
+                data-testid={`driver-segment-${s.kind}`}
               >
                 <s.Icon
                   className={cn("h-3 w-3 shrink-0", s.fillIcon && "fill-current")}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Settings } from "lucide-react";
 import { LiveIndicator } from "@/components/LiveIndicator";
 import { useUsageStore } from "@/store/usage-store";
 import { fetchSnapshot, triggerRefresh } from "@/lib/api";
@@ -97,6 +97,17 @@ export function DashboardV1({ skipLiveWiring = false }: DashboardV1Props): JSX.E
           >
             <RefreshCw className="h-3 w-3" /> Refresh
           </button>
+          {/* Spec v1.1 §5 Q4 — Settings popover. Affordance only in R1;
+              D10/D11/D12 wire the popover content in R2. */}
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted/40"
+            aria-label="Settings (deferred to round 2)"
+            disabled
+            data-testid="settings-affordance"
+          >
+            <Settings className="h-3 w-3" aria-hidden="true" />
+          </button>
         </div>
       </header>
 
@@ -108,7 +119,11 @@ export function DashboardV1({ skipLiveWiring = false }: DashboardV1Props): JSX.E
         </div>
       )}
 
-      <section className="kpi-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3" aria-label="Headline metrics">
+      <section
+        data-kpi-grid
+        className="kpi-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"
+        aria-label="Headline metrics"
+      >
         <MetricCardV1
           title="Today"
           value={todayValue}

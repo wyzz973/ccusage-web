@@ -94,7 +94,7 @@ describe("App mode switch", () => {
     expect(screen.getAllByTestId("metric-card-v1").length).toBeGreaterThan(0);
     // Driver strip should pick up the augmented snapshot's drivers.
     expect(screen.getByTestId("driver-strip")).toBeInTheDocument();
-    expect(screen.getByTestId("driver-agent")).toBeInTheDocument();
+    expect(screen.getByTestId("driver-segment-agent")).toBeInTheDocument();
   });
 
   it("v1 renders the trend chart, donut, block strip, and session table", () => {

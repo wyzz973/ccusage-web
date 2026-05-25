@@ -4,8 +4,11 @@
 
 /* Spec v1.1 §4 — collapse KPI grid to 2×2 below 800px viewport height
    so the M7 driver strip stays above the fold. Height-based, not
-   width-based, because that's the failure mode the PRD cares about. */
+   width-based, because that's the failure mode the PRD cares about.
+   Targets the `[data-kpi-grid]` attribute (prototype contract); the
+   `.kpi-grid` class alias is preserved for legacy lookups. */
 @media (max-height: 799px) {
+  .theme-v1 [data-kpi-grid],
   .theme-v1 .kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
