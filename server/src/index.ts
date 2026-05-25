@@ -11,6 +11,9 @@ const cfg = {
   ccusageBin: process.env.CCUSAGE_BIN ?? "ccusage",
   autoUpdateIntervalMs: Number(process.env.CCUSAGE_AUTO_UPDATE_INTERVAL_MS ?? 86_400_000),
   staticDir: path.resolve(__dirname, "public"),
+  // TZ honors the standard env var; falls back to UTC. Round-1 bug fix #3:
+  // today/week/month buckets now roll over at local midnight, not 00:00 UTC.
+  tz: process.env.TZ ?? "UTC",
 };
 
 const { app, poller, updater, hub } = buildApp(cfg);

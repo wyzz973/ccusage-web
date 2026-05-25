@@ -15,6 +15,8 @@ export interface AppConfig {
   ccusageBin: string;
   autoUpdateIntervalMs: number;
   staticDir: string;
+  /** IANA timezone for today/week/month key derivation. */
+  tz: string;
 }
 
 export function buildApp(cfg: AppConfig) {
@@ -25,6 +27,7 @@ export function buildApp(cfg: AppConfig) {
     runCcusage: (cmd: string) => runCcusage(cmd, { bin: cfg.ccusageBin, timeoutMs: cfg.ccusageTimeoutMs }),
     getVersion: () => getCcusageVersion({ bin: cfg.ccusageBin, timeoutMs: cfg.ccusageTimeoutMs }),
     intervalMs: cfg.pollIntervalMs,
+    tz: cfg.tz,
   });
   store.subscribe((snap: Snapshot) => hub.broadcast(snap));
 

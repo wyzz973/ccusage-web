@@ -10,6 +10,12 @@ export type UsageRecord = {
   modelsUsed: string[];
   modelBreakdowns: ModelBreakdown[];
   metadata?: { agents?: string[]; lastActivity?: string };
+  /**
+   * Round-1 additive: project name decoded from the Claude session path.
+   * Populated by the native parser in Round 2 (M6); typically `undefined`
+   * in Round 1. Classic UI ignores this field; v1 UI surfaces it.
+   */
+  project?: string;
 };
 
 export type ModelBreakdown = {
@@ -49,6 +55,22 @@ export type Derived = {
   allTime: { tokens: number; cost: number };
   activeBlock: Block | null;
   activeSessionCount: number;
+  /**
+   * Round-1 additive (Tier 2 / insights). Optional so classic consumers
+   * keep type-checking against the legacy shape. Populated by the poller
+   * via `server/src/insights/`.
+   */
+  todayDrivers?: {
+    agent?:   { name: string; pct: number; costUSD: number };
+    model?:   { name: string; pct: number; costUSD: number };
+    project?: { name: string; pct: number; costUSD: number };
+    totalCostUSD: number;
+  };
+  deltas?: {
+    today: { pct: number | null; vsLabel: string; current: number; previous: number };
+    week:  { pct: number | null; vsLabel: string; current: number; previous: number };
+    month: { pct: number | null; vsLabel: string; current: number; previous: number };
+  };
 };
 
 export type Snapshot = {
