@@ -4,6 +4,8 @@ import type { SnapshotStore } from "./snapshot-store.js";
 import {
   getTodayKey, getMonthKey, getWeekStartKey,
   computeTodayDrivers, computeSnapshotDeltas, previousPeriodKeys,
+  computeProjectRollups, computeCacheInsight, computeLimitResetInsight,
+  decodeProject,
 } from "./insights/index.js";
 
 export interface PollerDeps {
@@ -101,12 +103,48 @@ export function computeDerived(
     monthlyRecords: buckets.monthly,
   });
 
+  // R2 D1 — project rollups from the entire session window.
+  const projects = computeProjectRollups({ sessionRecords: buckets.session });
+
+  // R2 D5 — cache-savings over all daily records present.
+  const cache = computeCacheInsight({ dailyRecords: buckets.daily });
+
+  // R2 D9 — limit-reset banner state.
+  const limitReset = computeLimitResetInsight({ activeBlock, now });
+
   return {
     today, week, month, allTime,
     activeBlock, activeSessionCount,
     todayDrivers,
     deltas,
+    projects,
+    cache,
+    limitReset,
   };
+}
+
+/**
+ * R2 S4 — stamp `record.project` on every session record so the insights
+ * + UI layers don't have to re-derive from filename. Pure transform —
+ * leaves records without an inferable project untouched (project stays
+ * `undefined`, which the rollup treats as the absent state).
+ */
+export function stampProjects(records: UsageRecord[]): UsageRecord[] {
+  return records.map((r) => {
+    if (r.project != null && r.project !== "") return r;
+    // ccusage session records put the sessionId in `period`; the
+    // discoverable project is usually in `metadata` (project hint) or
+    // derivable from the file path. The native runner already stamps via
+    // the file path; the ccusage shellout path lacks the file path so
+    // we fall back to `metadata.project` if upstream ever exposes it.
+    const meta = r.metadata as (Record<string, unknown> | undefined);
+    const upstream = meta && typeof meta["project"] === "string" ? (meta["project"] as string) : null;
+    if (upstream && upstream !== "") {
+      const dec = decodeProject(upstream);
+      return { ...r, project: dec.canonical };
+    }
+    return r;
+  });
 }
 
 export function createPoller(deps: PollerDeps): Poller {
@@ -128,7 +166,10 @@ export function createPoller(deps: PollerDeps): Poller {
         daily:   (results[0] as any)["daily"]   as UsageRecord[],
         weekly:  (results[1] as any)["weekly"]  as UsageRecord[],
         monthly: (results[2] as any)["monthly"] as UsageRecord[],
-        session: (results[3] as any)["session"] as UsageRecord[],
+        // R2 S4 — stamp `project` on session records so insights/UI don't
+        // have to re-derive. No-op when records already carry it (native
+        // runner pre-stamps).
+        session: stampProjects((results[3] as any)["session"] as UsageRecord[]),
         blocks:  (results[4] as any)["blocks"]  as Block[],
       };
       const version = await deps.getVersion().catch(() => "unknown");

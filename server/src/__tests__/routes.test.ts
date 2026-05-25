@@ -129,4 +129,27 @@ describe("routes", () => {
       expect(res.status).toBe(503);
     });
   });
+
+  // D13 (R2): thin statusline endpoint.
+  describe("GET /api/statusline", () => {
+    it("returns ready=false with safe defaults when snapshot empty", async () => {
+      const { app } = makeApp({});
+      const res = await request(app).get("/api/statusline");
+      expect(res.status).toBe(200);
+      expect(res.body.ready).toBe(false);
+      expect(res.body.today).toEqual({ cost: 0, tokens: 0 });
+      expect(res.body.activeBlock).toBeNull();
+      expect(res.body.generatedAt).toBeNull();
+    });
+
+    it("returns ready=true with derived.today + ccusageVersion when populated", async () => {
+      const { app } = makeApp({ populated: true });
+      const res = await request(app).get("/api/statusline");
+      expect(res.status).toBe(200);
+      expect(res.body.ready).toBe(true);
+      expect(res.body.today).toEqual({ tokens: 0, cost: 0 });
+      expect(res.body.generatedAt).toBe("2026-05-24T10:00:00Z");
+      expect(res.body.ccusageVersion).toBe("1.0.0");
+    });
+  });
 });

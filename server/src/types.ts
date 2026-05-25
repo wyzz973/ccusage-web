@@ -71,6 +71,29 @@ export type Derived = {
     week:  { pct: number | null; vsLabel: string; current: number; previous: number };
     month: { pct: number | null; vsLabel: string; current: number; previous: number };
   };
+  /** R2 D1 — top projects rollup. */
+  projects?: Array<{
+    canonical: string;
+    displayName: string;
+    cost: number;
+    tokens: number;
+    sessions: number;
+    pctOfWindow: number;
+  }>;
+  /** R2 D5 — cache-savings insight. */
+  cache?: {
+    hitPct: number | null;
+    savedUSD: number;
+    sparkPctPerDay: number[];
+    wkOverWkDropPct: number | null;
+  };
+  /** R2 D9 — limit-reset banner state. */
+  limitReset?: {
+    active: boolean;
+    resetAt: string | null;
+    minutesUntilReset: number | null;
+    source: "upstream" | "heuristic" | null;
+  };
 };
 
 export type Snapshot = {

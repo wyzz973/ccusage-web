@@ -9,8 +9,14 @@ export {
   getWeekStartKey, getISOWeekNumberKey,
   getISOWeekKey, // deprecated alias, retained for back-compat
 } from "./period-keys.js";
-export { extractProject } from "./project.js";
-export type { ExtractProjectInput } from "./project.js";
+export { extractProject, decodeProject } from "./project.js";
+export type { ExtractProjectInput, DecodedProject } from "./project.js";
+export { computeProjectRollups } from "./projects.js";
+export type { ProjectRollup, ProjectsInputs } from "./projects.js";
+export { computeCacheInsight } from "./cache.js";
+export type { CacheInsight, CacheInputs } from "./cache.js";
+export { computeLimitResetInsight } from "./limit-reset.js";
+export type { LimitResetInsight, LimitResetInputs } from "./limit-reset.js";
 export { computeTodayDrivers } from "./drivers.js";
 export type { TodayDrivers, DriverSegment, DriversInputs } from "./drivers.js";
 export { computeSnapshotDeltas, previousPeriodKeys } from "./deltas.js";

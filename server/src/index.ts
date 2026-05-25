@@ -14,7 +14,10 @@ const cfg = {
   pollIntervalMs: Number(process.env.POLL_INTERVAL_MS ?? 2000),
   ccusageTimeoutMs: Number(process.env.CCUSAGE_TIMEOUT_MS ?? 30000),
   ccusageBin: process.env.CCUSAGE_BIN ?? "ccusage",
-  autoUpdateIntervalMs: Number(process.env.CCUSAGE_AUTO_UPDATE_INTERVAL_MS ?? 86_400_000),
+  // S8 (R2 elevated): default OFF (was 86_400_000). The previous default
+  // silently `npm install -g`'d ccusage every 24h without consent. Users who
+  // want auto-update can opt in by setting the env to a non-zero ms value.
+  autoUpdateIntervalMs: Number(process.env.CCUSAGE_AUTO_UPDATE_INTERVAL_MS ?? 0),
   staticDir: path.resolve(__dirname, "public"),
   // TZ honors the standard env var; falls back to UTC. Round-1 bug fix #3:
   // today/week/month buckets now roll over at local midnight, not 00:00 UTC.

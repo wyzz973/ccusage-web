@@ -40,6 +40,45 @@ export function createRoutes(deps: RoutesDeps): Router {
   });
 
   /**
+   * D13 (R2) — thin statusline endpoint. One-line compact JSON for
+   * shell-prompt / status-bar integrations that don't want to pull the
+   * full snapshot. Always 200 with safe defaults so callers can pipe to
+   * `jq` without branching.
+   */
+  r.get("/statusline", (_req, res) => {
+    const snap = deps.store.get();
+    if (!snap) {
+      res.json({
+        ready: false,
+        today: { cost: 0, tokens: 0 },
+        activeBlock: null,
+        generatedAt: null,
+      });
+      return;
+    }
+    const active = snap.derived.activeBlock;
+    res.json({
+      ready: true,
+      today: snap.derived.today,
+      activeBlock: active
+        ? {
+          id: active.id,
+          startTime: active.startTime,
+          endTime: active.endTime,
+          costUSD: active.costUSD,
+          pctOfProjection: active.projection && active.projection.totalCost > 0
+            ? Math.min(100, Math.round((active.costUSD / active.projection.totalCost) * 100))
+            : null,
+          isActive: active.isActive,
+        }
+        : null,
+      driver: snap.derived.todayDrivers?.agent ?? null,
+      generatedAt: snap.generatedAt,
+      ccusageVersion: snap.ccusageVersion,
+    });
+  });
+
+  /**
    * M-A2 (R1.5): hourly cost buckets for a single date in a given TZ.
    * Closes PRD §7.1 Tier 2 contract. The actual bucketing is done by the
    * pure `bucketHourly` insight; this route just shapes the request and
