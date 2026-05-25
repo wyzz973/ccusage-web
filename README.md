@@ -22,6 +22,7 @@ open http://localhost:47821
 | `CCUSAGE_AUTO_UPDATE_INTERVAL_MS` | `86400000` | Auto-update interval (24h). `0` disables. |
 | `CCUSAGE_BIN` | `ccusage` | Path to ccusage binary |
 | `TZ` | `UTC` | IANA timezone for `today`/`this week`/`this month` bucketing. Honors the standard env. |
+| `USAGE_SOURCE` | `ccusage` | Where the poller reads usage from. `ccusage` shells out to the binary (default); `native` walks `~/.claude/projects/**/*.jsonl` directly via the in-tree parser (M6 cutover; opt-in until soak validates parity — see [Usage source](#usage-source) below). |
 | `VITE_DASHBOARD_MODE` | `classic` | Build-time default dashboard mode: `classic` or `v1` (see below). |
 
 ## Dashboard modes
@@ -41,6 +42,21 @@ http://localhost:47821/?mode=classic
 ```
 
 V1-mode UI state (view toggle, trend window, trend mode, compare flag) persists under the `ccusage.v1.*` localStorage namespace so toggling between modes never corrupts the other side.
+
+## Usage source
+
+| Source | When to use | How to enable |
+|---|---|---|
+| `ccusage` (default) | The stable, ccusage-binary-backed path. No code changes from prior rounds. | Default; no action. |
+| `native` | In-tree JSONL parser; no `ccusage` binary required, no per-poll process spawn. M6 cutover. | `USAGE_SOURCE=native` on the server. |
+
+**Status (M6 Phase 1):** the native parser is committed and gated by the [golden-parity test](server/src/native/__tests__/native-parity.golden.test.ts) (tolerance: ±$0.00005 USD, exact integer tokens). Default stays on `ccusage` until a soak round validates per-bucket parity against the binary on real `~/.claude` data — that's the M6.d flip. Today's caveats with `USAGE_SOURCE=native`:
+
+- Discovery currently covers Claude Code (`~/.claude/projects/**`) only; Codex / Gemini / Copilot / OpenClaw remain ccusage-only until the agent-coverage work lands.
+- Block detection uses a simplified 5-hour-window scheme; ccusage's `burnRate`/`projection` may differ.
+- `metadata.agents` is per-file-root inferred (typically `["claude"]`).
+
+If you flip to `native`, compare `derived.deltas` numbers against a `ccusage`-mode snapshot before relying on them.
 
 ## How it works
 

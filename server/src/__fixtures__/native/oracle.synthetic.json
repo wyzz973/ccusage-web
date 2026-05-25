@@ -1,0 +1,22 @@
+{
+  "comment": "Hand-computed oracle for synthetic.jsonl. Per Researcher v2 §C.2 tolerance contract: cost equality to 4 decimal places (round4); tokens exact equality. Edge cases covered: 1 synthetic-model, 2 costUSD-null-accepted, 3 id-null-rejected, 4 version-dev-rejected, 5 sessionId-empty-rejected, 6 dedup-higher-tokens-wins, 7 fast-multiplier-on-opus-4-7, 8 sonnet-4-input-tier-break-200k, 9 cache-create-and-cache-read-simultaneous, 10 unknown-model-cost-zero. Computed by hand from the pricing-data.ts snapshot.",
+  "totals": {
+    "totalCost": 1.35745,
+    "totalTokens": 284400,
+    "inputTokens": 265600,
+    "outputTokens": 8800,
+    "cacheCreationTokens": 3000,
+    "cacheReadTokens": 7000,
+    "modelBreakdowns": [
+      { "modelName": "claude-sonnet-4",            "cost": 1.03335 },
+      { "modelName": "claude-opus-4-7-fast",       "cost": 0.315   },
+      { "modelName": "claude-haiku-4-5",           "cost": 0.007   },
+      { "modelName": "claude-haiku-4-5-fast",      "cost": 0.0021  },
+      { "modelName": "unknown-future-model-xyz",   "cost": 0.0     }
+    ]
+  },
+  "edgeCases": {
+    "lines_kept":     ["1 synthetic", "2 haiku", "6vs7 dedup→7 fast-wins", "8 opus-fast", "9 sonnet-tier", "10 sonnet-cache", "11 unknown"],
+    "lines_rejected": ["3 id-null", "4 version-dev", "5 sessionId-empty"]
+  }
+}

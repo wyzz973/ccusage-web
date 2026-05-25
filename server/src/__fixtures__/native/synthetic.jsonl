@@ -1,0 +1,11 @@
+{"timestamp":"2026-05-01T10:00:00Z","version":"1.0.0","sessionId":"sess-1","requestId":"req-1","message":{"id":"m1","model":"<synthetic>","usage":{"input_tokens":1000,"output_tokens":500}}}
+{"timestamp":"2026-05-01T10:01:00Z","version":"1.0.0","sessionId":"sess-1","requestId":"req-2","costUSD":null,"message":{"id":"m2","model":"claude-haiku-4-5","usage":{"input_tokens":2000,"output_tokens":1000}}}
+{"timestamp":"2026-05-01T10:02:00Z","version":"1.0.0","sessionId":"sess-1","requestId":"req-3","message":{"id":null,"model":"claude-haiku-4-5","usage":{"input_tokens":9999,"output_tokens":9999}}}
+{"timestamp":"2026-05-01T10:03:00Z","version":"dev","sessionId":"sess-1","requestId":"req-4","message":{"id":"m4","model":"claude-haiku-4-5","usage":{"input_tokens":9999,"output_tokens":9999}}}
+{"timestamp":"2026-05-01T10:04:00Z","version":"1.0.0","sessionId":"","requestId":"req-5","message":{"id":"m5","model":"claude-haiku-4-5","usage":{"input_tokens":9999,"output_tokens":9999}}}
+{"timestamp":"2026-05-01T10:05:00Z","version":"1.0.0","sessionId":"sess-2","requestId":"dupe","message":{"id":"d","model":"claude-haiku-4-5","usage":{"input_tokens":500,"output_tokens":250}}}
+{"timestamp":"2026-05-01T10:05:30Z","version":"1.0.0","sessionId":"sess-2","requestId":"dupe","message":{"id":"d","model":"claude-haiku-4-5","usage":{"input_tokens":600,"output_tokens":300,"speed":"fast"}}}
+{"timestamp":"2026-05-01T10:06:00Z","version":"1.0.0","sessionId":"sess-3","requestId":"req-6","message":{"id":"m6","model":"claude-opus-4-7","usage":{"input_tokens":1000,"output_tokens":500,"speed":"fast"}}}
+{"timestamp":"2026-05-01T10:07:00Z","version":"1.0.0","sessionId":"sess-4","requestId":"req-7","message":{"id":"m7","model":"claude-sonnet-4","usage":{"input_tokens":250000,"output_tokens":1000}}}
+{"timestamp":"2026-05-01T10:08:00Z","version":"1.0.0","sessionId":"sess-5","requestId":"req-8","message":{"id":"m8","model":"claude-sonnet-4","usage":{"input_tokens":10000,"output_tokens":5000,"cache_creation_input_tokens":3000,"cache_read_input_tokens":7000}}}
+{"timestamp":"2026-05-01T10:09:00Z","version":"1.0.0","sessionId":"sess-6","requestId":"req-9","message":{"id":"m9","model":"unknown-future-model-xyz","usage":{"input_tokens":1000,"output_tokens":500}}}
