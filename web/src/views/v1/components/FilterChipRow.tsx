@@ -11,7 +11,13 @@ function chipDescriptor(c: FilterChip): { label: string; tint?: string } {
     const k = toAgentKey(c.value) as AgentKey;
     return { label: AGENT_LABEL[k], tint: AGENT_COLORS[k] };
   }
-  if (c.kind === "project") return { label: `project: ${c.value}` };
+  if (c.kind === "project") {
+    // S3 (R2): prefer the human-facing displayName; fall back to canonical.
+    const label = c.displayName ? `project: ${c.displayName}` : `project: ${c.value}`;
+    return { label };
+  }
+  if (c.kind === "model") return { label: `model: ${c.value}` };
+  if (c.kind === "range") return { label: c.displayName ?? c.value, tint: "hsl(199 89% 60%)" };
   if (c.kind === "date") return { label: c.value };
   return { label: `session: ${c.value}` };
 }

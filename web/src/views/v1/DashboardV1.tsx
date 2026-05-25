@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { RefreshCw, Settings } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { LiveIndicator } from "@/components/LiveIndicator";
 import { useUsageStore } from "@/store/usage-store";
 import { fetchSnapshot, triggerRefresh } from "@/lib/api";
@@ -12,14 +12,21 @@ import { TrendChartV1 } from "./components/TrendChartV1";
 import { ModelDonutV1 } from "./components/ModelDonutV1";
 import { BlockHistoryStrip } from "./components/BlockHistoryStrip";
 import { SessionTableV1 } from "./components/SessionTableV1";
+import { DateRangePickerV1 } from "./components/DateRangePickerV1";
+import { SettingsPopoverV1 } from "./components/SettingsPopoverV1";
+import { ModeBadgesV1 } from "./components/ModeBadgesV1";
+import { ProjectsPanelV1 } from "./components/ProjectsPanelV1";
+import { ProjectsDialogV1 } from "./components/ProjectsDialogV1";
+import { CacheSavingsPanelV1 } from "./components/CacheSavingsPanelV1";
 import {
-  selectKpis, selectAgentBreakdown, selectDailySparkSeries, selectTodayDriversFallback,
+  selectKpis, selectAgentBreakdown, selectDailySparkSeries,
+  selectTodayDriversFallback, selectDailyInRange, selectSessionsInRange,
 } from "./data/selectors";
 import { useV1Store } from "./data/v1-store";
+import { HistoryV1 } from "./pages/HistoryV1";
 import { AGENT_COLORS, AGENT_LABEL, SEMANTIC, toAgentKey } from "./lib/agent-colors";
 import "./style.css";
 
-/** Today's key in the user's TZ — best-effort derived in browser. */
 function localTodayKey(): string {
   const now = new Date();
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -29,15 +36,24 @@ function localTodayKey(): string {
 }
 
 export interface DashboardV1Props {
-  /** Skip live data wiring (used by integration tests). */
   skipLiveWiring?: boolean;
+  /** Force route for tests; production reads from window.location.pathname. */
+  routeOverride?: "main" | "history";
 }
 
-export function DashboardV1({ skipLiveWiring = false }: DashboardV1Props): JSX.Element {
+function resolveRoute(override?: "main" | "history"): "main" | "history" {
+  if (override) return override;
+  if (typeof window === "undefined") return "main";
+  return window.location.pathname.startsWith("/history") ? "history" : "main";
+}
+
+export function DashboardV1({ skipLiveWiring = false, routeOverride }: DashboardV1Props): JSX.Element {
   const snap = useUsageStore((s) => s.snapshot);
   const view = useV1Store((s) => s.view);
   const filters = useV1Store((s) => s.filters);
   const addFilter = useV1Store((s) => s.addFilter);
+  const range = useV1Store((s) => s.range);
+  const route = resolveRoute(routeOverride);
 
   useEffect(() => {
     if (skipLiveWiring) return;
@@ -51,10 +67,12 @@ export function DashboardV1({ skipLiveWiring = false }: DashboardV1Props): JSX.E
   }, [skipLiveWiring]);
 
   const kpis = selectKpis(snap);
-
   const todayKey = useMemo(() => localTodayKey(), []);
   const drivers = snap?.derived.todayDrivers ?? selectTodayDriversFallback(snap, todayKey);
   const deltas = snap?.derived.deltas;
+  const projects = snap?.derived.projects ?? [];
+  const cache = snap?.derived.cache;
+  const limitReset = snap?.derived.limitReset;
 
   const agentBreakdown = useMemo(
     () => selectAgentBreakdown(snap?.daily.records ?? []),
@@ -62,16 +80,19 @@ export function DashboardV1({ skipLiveWiring = false }: DashboardV1Props): JSX.E
   );
   const topAgent = agentBreakdown[0];
 
-  // Sparkline data: aggregate (default) or top-agent slice (by-agent view).
   const sparkData = useMemo(
     () => selectDailySparkSeries(snap?.daily.records ?? [], 14),
     [snap],
   );
   const sparkColor = view === "by-agent" && topAgent ? AGENT_COLORS[topAgent.agent] : SEMANTIC.info;
 
-  const sessionRecords = snap?.session.records ?? [];
+  // R2 D2 + S13: re-scope every per-window surface (donut + projects +
+  // sessions) through the range picker so they move together.
+  const allDaily = snap?.daily.records ?? [];
+  const allSessions = snap?.session.records ?? [];
+  const inRangeDaily = useMemo(() => selectDailyInRange(allDaily, range), [allDaily, range]);
+  const inRangeSessions = useMemo(() => selectSessionsInRange(allSessions, range), [allSessions, range]);
   const blocks = snap?.blocks.records ?? [];
-  const dailyRecords = snap?.daily.records ?? [];
 
   const showByAgent = view === "by-agent" && topAgent != null;
   const valueAccent = showByAgent ? AGENT_COLORS[topAgent.agent] : undefined;
@@ -79,6 +100,28 @@ export function DashboardV1({ skipLiveWiring = false }: DashboardV1Props): JSX.E
   const subtitle = showByAgent
     ? `Top agent: ${AGENT_LABEL[topAgent.agent]}`
     : "Sum of today's daily records";
+
+  if (route === "history") {
+    return (
+      <div className="theme-v1 mx-auto max-w-7xl p-6 space-y-4" data-testid="dashboard-v1">
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-4">
+            <h1 className="text-lg font-semibold tracking-tight">ccusage · History</h1>
+          </div>
+          <div className="flex items-center gap-3 text-xs">
+            <LiveIndicator />
+            <a
+              href={typeof window !== "undefined" ? `${window.location.pathname.replace(/\/history.*/, "/")}${window.location.search || "?mode=v1"}` : "/?mode=v1"}
+              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted/40"
+            >
+              ← Back to dashboard
+            </a>
+          </div>
+        </header>
+        <HistoryV1 blocks={blocks} />
+      </div>
+    );
+  }
 
   return (
     <div className="theme-v1 mx-auto max-w-7xl p-6 space-y-4" data-testid="dashboard-v1">
@@ -89,6 +132,8 @@ export function DashboardV1({ skipLiveWiring = false }: DashboardV1Props): JSX.E
         </div>
         <div className="flex items-center gap-3 text-xs">
           <LiveIndicator />
+          <ModeBadgesV1 />
+          <DateRangePickerV1 />
           <button
             type="button"
             className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted/40"
@@ -97,17 +142,7 @@ export function DashboardV1({ skipLiveWiring = false }: DashboardV1Props): JSX.E
           >
             <RefreshCw className="h-3 w-3" /> Refresh
           </button>
-          {/* Spec v1.1 §5 Q4 — Settings popover. Affordance only in R1;
-              D10/D11/D12 wire the popover content in R2. */}
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted/40"
-            aria-label="Settings (deferred to round 2)"
-            disabled
-            data-testid="settings-affordance"
-          >
-            <Settings className="h-3 w-3" aria-hidden="true" />
-          </button>
+          <SettingsPopoverV1 />
         </div>
       </header>
 
@@ -175,20 +210,30 @@ export function DashboardV1({ skipLiveWiring = false }: DashboardV1Props): JSX.E
       <DriverStrip {...drivers} />
 
       <TrendChartV1
-        records={dailyRecords}
+        records={allDaily}
         onPickAgent={(a) => addFilter({ kind: "agent", value: toAgentKey(a) })}
         onPickDate={(d) => addFilter({ kind: "date", value: d })}
       />
 
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      {/* B4 2×2 per spec-v2 §3. `data-b4-grid` matches the prototype contract;
+          mobile rule (max-width: 768px) collapses to 1-up in style.css. */}
+      <section
+        data-b4-grid
+        className="b4-grid grid grid-cols-1 lg:grid-cols-2 gap-3"
+        aria-label="Breakdown panels"
+      >
         <ModelDonutV1
-          records={dailyRecords}
-          onPickModel={(m) => addFilter({ kind: "project", value: m })}
+          records={inRangeDaily}
+          onPickModel={(m) => addFilter({ kind: "model", value: m })}
         />
-        <BlockHistoryStrip blocks={blocks} />
+        <BlockHistoryStrip blocks={blocks} limitReset={limitReset} />
+        <ProjectsPanelV1 projects={projects} />
+        <CacheSavingsPanelV1 cache={cache} />
       </section>
 
-      <SessionTableV1 records={sessionRecords} />
+      <SessionTableV1 records={inRangeSessions} />
+
+      <ProjectsDialogV1 projects={projects} />
 
       {snap && (
         <footer className="text-[10px] text-muted-foreground text-right">

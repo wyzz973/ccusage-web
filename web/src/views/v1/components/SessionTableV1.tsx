@@ -138,6 +138,13 @@ export function SessionTableV1({
               )}
               {visible.map((s) => {
                 const k = toAgentKey(s.agent);
+                // M2 (R2): project column shows the short displayName for
+                // readability while the chip dispatch keeps the canonical
+                // form for stable identity (S3 fix).
+                const projCanonical = s.project ?? "";
+                const projDisplay = projCanonical
+                  ? projCanonical.replace(/^-/, "").split("-").filter(Boolean).pop() ?? projCanonical
+                  : "—";
                 return (
                   <tr
                     key={s.period}
@@ -156,7 +163,24 @@ export function SessionTableV1({
                         {AGENT_LABEL[k]}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-xs">{s.project ?? "—"}</td>
+                    <td className="px-3 py-2 text-xs">
+                      {projCanonical ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            addFilter({ kind: "project", value: projCanonical, displayName: projDisplay });
+                          }}
+                          className="hover:text-foreground hover:underline truncate max-w-[14ch]"
+                          title={projCanonical}
+                          data-testid="session-project-cell"
+                        >
+                          {projDisplay}
+                        </button>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-right font-mono tabular-nums">{formatNumber(s.totalTokens)}</td>
                     <td className="px-3 py-2 text-right font-mono tabular-nums">{formatCost(s.totalCost)}</td>
                   </tr>

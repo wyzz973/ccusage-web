@@ -3,11 +3,10 @@ import {
   Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn, formatCost } from "@/lib/utils";
 import { AGENT_COLORS, AGENT_LABEL, SEMANTIC } from "../lib/agent-colors";
-import { useV1Store, type TrendMode, type TrendWindow } from "../data/v1-store";
-import { selectTrendSeries } from "../data/selectors";
+import { useV1Store, type TrendMode, formatRangeLabel } from "../data/v1-store";
+import { selectTrendSeries, selectDailyInRange } from "../data/selectors";
 import { fetchHourly, type HourlyBucket } from "@/lib/api";
 import type { UsageRecord } from "@/types";
 
@@ -18,11 +17,17 @@ const MODE_OPTIONS: { value: TrendMode; label: string }[] = [
   { value: "lines", label: "Lines" },
 ];
 
-const TODAY_WINDOWS: TrendWindow[] = ["today", "7", "30", "60", "90"];
+function daysBetween(from: string, to: string): number {
+  const a = Date.parse(from + "T00:00:00Z");
+  const b = Date.parse(to + "T00:00:00Z");
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return 30;
+  return Math.max(1, Math.round((b - a) / 86_400_000) + 1);
+}
 
-function windowDays(w: TrendWindow): number {
-  if (w === "today") return 1;
-  return Number(w);
+function isoDayShift(date: string, days: number): string {
+  const ms = Date.parse(date + "T00:00:00Z");
+  if (!Number.isFinite(ms)) return date;
+  return new Date(ms + days * 86_400_000).toISOString().slice(0, 10);
 }
 
 export interface TrendChartV1Props {
@@ -54,24 +59,43 @@ function browserHour(tz: string): number {
 export function TrendChartV1({
   records, onPickAgent, onPickDate, todayKey, tz, hourlyFetcher,
 }: TrendChartV1Props): JSX.Element {
-  const window = useV1Store((s) => s.trendWindow);
-  const setWindow = useV1Store((s) => s.setTrendWindow);
+  // R2 D2: range picker (in B0) is the single source of truth — the old
+  // Today/7/30/60/90 tabs are gone per spec-v2 §3.3.6.
+  const range = useV1Store((s) => s.range);
   const mode = useV1Store((s) => s.trendMode);
   const setMode = useV1Store((s) => s.setTrendMode);
+  const compareOn = useV1Store((s) => s.compareOn);
 
   const resolvedTz = tz ?? (typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC");
   const resolvedToday = todayKey ?? browserTodayKey(resolvedTz);
   const nowHour = browserHour(resolvedTz);
 
-  const { data, agents } = useMemo(() => selectTrendSeries(records, windowDays(window)), [records, window]);
+  const isToday = range.preset === "today";
+  const windowDays_ = daysBetween(range.from, range.to);
+  const inRange = useMemo(() => selectDailyInRange(records, range), [records, range]);
+  const { data, agents } = useMemo(() => selectTrendSeries(inRange, windowDays_), [inRange, windowDays_]);
 
-  // M-A2 (R1.5): when the user picks the "Today" tab, fetch the 24-bucket
-  // hourly series from the server route. Falls back gracefully (empty array
-  // → chart shows "no data") if the fetch errors.
+  // R2 D2: Compare overlay — same-length window immediately prior.
+  const compareData = useMemo(() => {
+    if (!compareOn || isToday) return null;
+    const priorTo = isoDayShift(range.from, -1);
+    const priorFrom = isoDayShift(priorTo, -(windowDays_ - 1));
+    const slice = selectDailyInRange(records, { from: priorFrom, to: priorTo });
+    const { data: prior } = selectTrendSeries(slice, windowDays_);
+    // Map prior into the current row indices so the recharts series aligns by index.
+    return prior;
+  }, [compareOn, isToday, range.from, records, windowDays_]);
+
+  const mergedData = useMemo(() => {
+    if (!compareData) return data;
+    return data.map((row, i) => ({ ...row, prev: compareData[i]?.total ?? null }));
+  }, [data, compareData]);
+
+  // M-A2 (R1.5): when range = Today, fetch the 24-bucket hourly series.
   const [hourly, setHourly] = useState<HourlyBucket[] | null>(null);
   const [hourlyError, setHourlyError] = useState<string | null>(null);
   useEffect(() => {
-    if (window !== "today") return;
+    if (!isToday) return;
     let cancelled = false;
     const fetcher = hourlyFetcher ?? fetchHourly;
     setHourlyError(null);
@@ -84,24 +108,17 @@ export function TrendChartV1({
         }
       });
     return () => { cancelled = true; };
-  }, [window, resolvedToday, resolvedTz, hourlyFetcher]);
+  }, [isToday, resolvedToday, resolvedTz, hourlyFetcher]);
 
   return (
     <Card data-testid="trend-chart-v1">
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 pb-2">
         <CardTitle className="text-base text-foreground">
-          {window === "today" ? "Today" : `Daily trend · last ${window} days`}
+          {isToday ? "Today · hourly" : `Cost trend · ${formatRangeLabel(range)}`}
         </CardTitle>
         <div className="flex flex-wrap items-center gap-3">
-          <Tabs value={window} onValueChange={(v) => setWindow(v as TrendWindow)}>
-            <TabsList>
-              {TODAY_WINDOWS.map((w) => (
-                <TabsTrigger key={w} value={w}>
-                  {w === "today" ? "Today" : `${w}d`}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
+          {/* R2 D2 (spec-v2 §3.3.6): per-chart window tabs removed —
+              B0 Range picker is the single source of truth. */}
           <div role="radiogroup" aria-label="Trend mode" className="inline-flex rounded-md border border-border p-0.5 text-[11px]">
             {MODE_OPTIONS.map((m) => (
               <button
@@ -124,7 +141,7 @@ export function TrendChartV1({
       </CardHeader>
 
       <CardContent className="h-[260px]" data-testid="trend-chart-body">
-        {window === "today" ? (
+        {isToday ? (
           hourly == null ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               {hourlyError ? `Hourly unavailable (${hourlyError})` : "Loading hourly…"}
@@ -185,7 +202,7 @@ export function TrendChartV1({
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart
-              data={data}
+              data={mergedData}
               margin={{ top: 6, right: 12, left: 4, bottom: 0 }}
               stackOffset={mode === "100" ? "expand" : "none"}
               onClick={(state) => {
@@ -255,6 +272,21 @@ export function TrendChartV1({
                     onClick={() => onPickAgent?.(a)}
                   />
                 ))
+              )}
+              {/* R2 D2 (spec-v2 §3.3.3) — dashed ghost line for the
+                  same-length prior window. Suppressed in 100%-stack mode
+                  (the y-axis is a ratio and a $-line on it would mislead). */}
+              {compareOn && mode !== "100" && (
+                <Area
+                  type="monotone"
+                  dataKey="prev"
+                  stroke="hsl(var(--muted-foreground))"
+                  strokeDasharray="4 3"
+                  fill="transparent"
+                  strokeWidth={1.5}
+                  isAnimationActive={false}
+                  data-testid="trend-compare-ghost"
+                />
               )}
             </AreaChart>
           </ResponsiveContainer>

@@ -19,7 +19,7 @@ open http://localhost:47821
 | `PORT` | `47821` | HTTP port |
 | `POLL_INTERVAL_MS` | `2000` | How often to re-run ccusage |
 | `CCUSAGE_TIMEOUT_MS` | `30000` | Per-ccusage-command timeout |
-| `CCUSAGE_AUTO_UPDATE_INTERVAL_MS` | `86400000` | Auto-update interval (24h). `0` disables. |
+| `CCUSAGE_AUTO_UPDATE_INTERVAL_MS` | `0` (off — R2/S8) | Auto-update interval in ms. `0` disables. Was `86_400_000` before R2; default flipped because the prior behavior silently mutated global node_modules without consent. |
 | `CCUSAGE_BIN` | `ccusage` | Path to ccusage binary |
 | `TZ` | `UTC` | IANA timezone for `today`/`this week`/`this month` bucketing. Honors the standard env. |
 | `USAGE_SOURCE` | `ccusage` | Where the poller reads usage from. `ccusage` shells out to the binary (default); `native` walks `~/.claude/projects/**/*.jsonl` directly via the in-tree parser (M6 cutover; opt-in until soak validates parity — see [Usage source](#usage-source) below). |
@@ -41,7 +41,9 @@ http://localhost:47821/?mode=v1
 http://localhost:47821/?mode=classic
 ```
 
-V1-mode UI state (view toggle, trend window, trend mode, compare flag) persists under the `ccusage.v1.*` localStorage namespace so toggling between modes never corrupts the other side.
+V1-mode UI state (view toggle, range picker, trend mode, compare flag) persists under the `ccusage.v1.*` localStorage namespace so toggling between modes never corrupts the other side. Cross-mode data preferences (cost mode / offline / native parser / timezone — all R2 D10/D11/D12 controls) live under the flat `ccusage.*` namespace because they're not UI state and should apply across modes.
+
+V1 mode adds a `/history` route (`/history?mode=v1`) showing the chronological list of past 5-hour blocks grouped by date with a detail dialog. The calendar heatmap + month-over-month bars from spec-v2 §3.6.3 are R3-stretch and not rendered yet.
 
 ## Usage source
 

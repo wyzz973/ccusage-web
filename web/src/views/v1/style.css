@@ -21,3 +21,12 @@
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+/* R2 spec-v2 §3 — B4 2×2 grid collapses to 1-up at narrow widths so the
+   four panels stack legibly on mobile. `data-b4-grid` matches prototype. */
+@media (max-width: 768px) {
+  .theme-v1 [data-b4-grid],
+  .theme-v1 .b4-grid {
+    grid-template-columns: 1fr;
+  }
+}

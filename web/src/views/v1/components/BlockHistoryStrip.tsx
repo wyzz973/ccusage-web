@@ -2,7 +2,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn, formatCost, formatNumber } from "@/lib/utils";
 import { formatPct } from "../lib/format";
 import { SEMANTIC } from "../lib/agent-colors";
-import type { Block } from "@/types";
+import { LimitResetBannerV1 } from "./LimitResetBannerV1";
+import type { Block, Derived } from "@/types";
 
 // B4-R · 5h-block status + history strip (spec §2.5).
 // Caveat: % of cap depends on a cap value. ccusage does not currently
@@ -17,9 +18,11 @@ function tintFor(pct: number): string {
 
 export interface BlockHistoryStripProps {
   blocks: Block[];
+  /** R2 D9 — limit-reset banner state, mounted scoped to this card per spec-v2 §3 placement. */
+  limitReset?: Derived["limitReset"];
 }
 
-export function BlockHistoryStrip({ blocks }: BlockHistoryStripProps): JSX.Element {
+export function BlockHistoryStrip({ blocks, limitReset }: BlockHistoryStripProps): JSX.Element {
   const usable = blocks.filter((b) => !b.isGap);
   const active = usable.find((b) => b.isActive) ?? null;
   const recent = usable.filter((b) => !b.isActive).slice(-7);
@@ -38,6 +41,7 @@ export function BlockHistoryStrip({ blocks }: BlockHistoryStripProps): JSX.Eleme
         </span>
       </CardHeader>
       <CardContent className="space-y-3">
+        <LimitResetBannerV1 limitReset={limitReset} />
         {active ? (
           <div>
             <div className="flex items-baseline justify-between">

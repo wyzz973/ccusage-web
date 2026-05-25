@@ -6,8 +6,30 @@ import type { AgentKey } from "../lib/agent-colors";
 import { toAgentKey } from "../lib/agent-colors";
 
 export interface FilterChip {
-  kind: "agent" | "project" | "model" | "date" | "session";
+  kind: "agent" | "project" | "model" | "date" | "session" | "range";
   value: string;
+  /** Optional human-facing label override. D1 uses displayName so the chip
+   *  shows `web` while the canonical value stays unique for chip identity. */
+  displayName?: string;
+}
+
+// ── R2: range-aware slicing (D2 + S13) ───────────────────────────────────
+
+export interface DateRange { from: string; to: string }
+
+/** Filter daily records by an inclusive [from, to] YYYY-MM-DD range. */
+export function selectDailyInRange(records: UsageRecord[], range: DateRange): UsageRecord[] {
+  return records.filter((r) => r.period >= range.from && r.period <= range.to);
+}
+
+/** Filter session records by lastActivity inside [from, to]. */
+export function selectSessionsInRange(records: UsageRecord[], range: DateRange): UsageRecord[] {
+  return records.filter((r) => {
+    const t = r.metadata?.lastActivity;
+    if (!t) return false;
+    const day = t.slice(0, 10);
+    return day >= range.from && day <= range.to;
+  });
 }
 
 // ── KPI numbers ──────────────────────────────────────────────────────────
