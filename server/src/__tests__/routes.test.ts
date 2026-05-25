@@ -4,13 +4,13 @@ import request from "supertest";
 import { createSnapshotStore } from "../snapshot-store";
 import { createSseHub } from "../sse-hub";
 import { createRoutes } from "../routes";
-import type { Snapshot } from "../types";
+import type { Snapshot, UsageRecord } from "../types";
 
-function snap(at: string): Snapshot {
+function snap(at: string, sessionRecords: UsageRecord[] = []): Snapshot {
   return {
     generatedAt: at, ccusageVersion: "1.0.0",
     daily:   { records: [] }, weekly:  { records: [] },
-    monthly: { records: [] }, session: { records: [] },
+    monthly: { records: [] }, session: { records: sessionRecords },
     blocks:  { records: [] },
     derived: {
       today:   { tokens: 0, cost: 0 }, week:    { tokens: 0, cost: 0 },
@@ -20,13 +20,26 @@ function snap(at: string): Snapshot {
   };
 }
 
-function makeApp(opts: { runOnce?: () => Promise<void>; populated?: boolean }) {
+function sess(lastActivity: string, cost: number): UsageRecord {
+  return {
+    period: `sess-${lastActivity}`, agent: "claude",
+    totalTokens: 0, totalCost: cost,
+    inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0,
+    modelsUsed: [], modelBreakdowns: [], metadata: { lastActivity },
+  };
+}
+
+function makeApp(opts: { runOnce?: () => Promise<void>; populated?: boolean; sessionRecords?: UsageRecord[]; tz?: string }) {
   const store = createSnapshotStore();
-  if (opts.populated) store.set(snap("2026-05-24T10:00:00Z"));
+  if (opts.populated) store.set(snap("2026-05-24T10:00:00Z", opts.sessionRecords ?? []));
   const hub = createSseHub();
   const app = express();
   app.use(express.json());
-  app.use("/api", createRoutes({ store, hub, refresh: opts.runOnce ?? (async () => {}) }));
+  app.use("/api", createRoutes({
+    store, hub,
+    refresh: opts.runOnce ?? (async () => {}),
+    tz: opts.tz,
+  }));
   return { app, store, hub };
 }
 
@@ -59,5 +72,61 @@ describe("routes", () => {
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("ok");
     expect(res.body.lastPollAt).toBe("2026-05-24T10:00:00Z");
+  });
+
+  // M-A2 (R1.5): hourly endpoint.
+  describe("GET /api/usage/hourly", () => {
+    it("returns 24 zero-filled buckets when no sessions match the date", async () => {
+      const { app } = makeApp({ populated: true });
+      const res = await request(app).get("/api/usage/hourly?date=2026-05-25&tz=UTC");
+      expect(res.status).toBe(200);
+      expect(res.body.date).toBe("2026-05-25");
+      expect(res.body.tz).toBe("UTC");
+      expect(res.body.buckets).toHaveLength(24);
+      expect(res.body.buckets.every((b: { cost: number }) => b.cost === 0)).toBe(true);
+    });
+
+    it("folds today's sessions into the correct hour-of-day buckets", async () => {
+      const { app } = makeApp({
+        populated: true,
+        sessionRecords: [
+          sess("2026-05-25T07:30:00Z", 1.5),  // 00:30 PDT → hour 0
+          sess("2026-05-25T22:15:00Z", 2.5),  // 15:15 PDT → hour 15
+        ],
+      });
+      const res = await request(app).get("/api/usage/hourly?date=2026-05-25&tz=America/Los_Angeles");
+      expect(res.status).toBe(200);
+      expect(res.body.buckets[0].cost).toBe(1.5);
+      expect(res.body.buckets[15].cost).toBe(2.5);
+    });
+
+    it("uses today + fallback tz when query params are omitted", async () => {
+      const { app } = makeApp({ populated: true, tz: "UTC" });
+      const res = await request(app).get("/api/usage/hourly");
+      expect(res.status).toBe(200);
+      expect(res.body.tz).toBe("UTC");
+      expect(res.body.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(res.body.buckets).toHaveLength(24);
+    });
+
+    it("returns 400 for an invalid date shape", async () => {
+      const { app } = makeApp({ populated: true });
+      const res = await request(app).get("/api/usage/hourly?date=bogus&tz=UTC");
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/invalid date/);
+    });
+
+    it("returns 400 for an invalid TZ", async () => {
+      const { app } = makeApp({ populated: true });
+      const res = await request(app).get("/api/usage/hourly?date=2026-05-25&tz=Not/A_Zone");
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/invalid tz/);
+    });
+
+    it("returns 503 when snapshot isn't ready", async () => {
+      const { app } = makeApp({});
+      const res = await request(app).get("/api/usage/hourly?date=2026-05-25&tz=UTC");
+      expect(res.status).toBe(503);
+    });
   });
 });

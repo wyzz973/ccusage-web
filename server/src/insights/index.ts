@@ -4,7 +4,11 @@
 // fields the v1 UI consumes. Everything here is a pure function — no
 // process, no clock except for `now` parameters — so tests are trivial.
 
-export { getTodayKey, getMonthKey, getISOWeekKey } from "./period-keys.js";
+export {
+  getTodayKey, getMonthKey,
+  getWeekStartKey, getISOWeekNumberKey,
+  getISOWeekKey, // deprecated alias, retained for back-compat
+} from "./period-keys.js";
 export { extractProject } from "./project.js";
 export type { ExtractProjectInput } from "./project.js";
 export { computeTodayDrivers } from "./drivers.js";

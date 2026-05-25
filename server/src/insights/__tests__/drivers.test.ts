@@ -50,7 +50,7 @@ describe("computeTodayDrivers", () => {
   it("omits project segment when sessions are unattributed (Round-1 default)", () => {
     const out = computeTodayDrivers({
       todaysDailyRecords: [rec("claude", "2026-05-25", 10)],
-      todaysSessions: [{ project: undefined, cost: 5 }, { project: "unknown", cost: 5 }],
+      todaysSessions: [{ agent: "claude", project: undefined, cost: 5 }, { agent: "claude", project: "unknown", cost: 5 }],
     });
     expect(out.project).toBeUndefined();
   });
@@ -59,9 +59,9 @@ describe("computeTodayDrivers", () => {
     const out = computeTodayDrivers({
       todaysDailyRecords: [rec("claude", "2026-05-25", 100)],
       todaysSessions: [
-        { project: "client-a", cost: 60 },
-        { project: "ledger", cost: 30 },
-        { project: "unknown", cost: 10 },
+        { agent: "claude", project: "client-a", cost: 60 },
+        { agent: "claude", project: "ledger", cost: 30 },
+        { agent: "claude", project: "unknown", cost: 10 },
       ],
     });
     expect(out.project?.name).toBe("client-a");
@@ -74,5 +74,33 @@ describe("computeTodayDrivers", () => {
     });
     expect(out.agent?.name).toBe("codex");
     expect(out.totalCostUSD).toBe(10);
+  });
+
+  // M-A3 (R1.5): ccusage daily emits `agent: "all"`; sessions carry real agent
+  // labels. The driver strip must surface a real agent name, not "all"/"unknown".
+  it("prefers session-level agent rollup over daily's 'all' sentinel (M-A3)", () => {
+    const out = computeTodayDrivers({
+      todaysDailyRecords: [
+        rec("all", "2026-05-25", 100, [{ modelName: "opus", cost: 70, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 }]),
+      ],
+      todaysSessions: [
+        { agent: "claude", cost: 70 },
+        { agent: "codex",  cost: 30 },
+      ],
+    });
+    expect(out.agent?.name).toBe("claude");
+    expect(out.agent?.name).not.toBe("all");
+    expect(out.agent?.name).not.toBe("unknown");
+    expect(out.agent?.pct).toBe(70);
+  });
+
+  it("falls back to metadata.agents[0] when sessions are absent (M-A3 fallback)", () => {
+    const out = computeTodayDrivers({
+      todaysDailyRecords: [{
+        ...rec("all", "2026-05-25", 50),
+        metadata: { agents: ["codex"] },
+      }],
+    });
+    expect(out.agent?.name).toBe("codex");
   });
 });

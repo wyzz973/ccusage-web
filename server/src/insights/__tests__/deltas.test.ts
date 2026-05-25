@@ -63,7 +63,25 @@ describe("previousPeriodKeys", () => {
   it("computes yesterday/prev-week/prev-month relative to now in TZ", () => {
     const k = previousPeriodKeys(new Date("2026-05-25T14:23:07Z"), "UTC");
     expect(k.yesterdayKey).toBe("2026-05-24");
-    expect(k.prevWeekKey).toBe("2026-W21");
+    // M-A1 (R1.5): prevWeekKey is Monday-anchored YYYY-MM-DD now (was YYYY-Www).
+    expect(k.prevWeekKey).toBe("2026-05-18");
     expect(k.prevMonthKey).toBe("2026-04");
+  });
+
+  // S1 (R1 review): prevMonth must use the last day of the previous month
+  // so it never lands on (e.g.) May 1 → Mar 31 (skipping April).
+  it("does not skip a month when called on day 1 (S1 fix)", () => {
+    const k = previousPeriodKeys(new Date("2026-05-01T12:00:00Z"), "UTC");
+    expect(k.prevMonthKey).toBe("2026-04");
+  });
+
+  it("handles month boundary cleanly on day 1 of March (after Feb)", () => {
+    const k = previousPeriodKeys(new Date("2026-03-01T12:00:00Z"), "UTC");
+    expect(k.prevMonthKey).toBe("2026-02");
+  });
+
+  it("handles January 1 (prev month = December of prior year)", () => {
+    const k = previousPeriodKeys(new Date("2026-01-01T12:00:00Z"), "UTC");
+    expect(k.prevMonthKey).toBe("2025-12");
   });
 });

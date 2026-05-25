@@ -125,6 +125,7 @@ export function DashboardV1({ skipLiveWiring = false }: DashboardV1Props): JSX.E
         aria-label="Headline metrics"
       >
         <MetricCardV1
+          testId="metric-card-today"
           title="Today"
           value={todayValue}
           format="cost"

@@ -42,7 +42,7 @@ export function buildApp(cfg: AppConfig) {
 
   const app = express();
   app.use(express.json());
-  app.use("/api", createRoutes({ store, hub, refresh: () => poller.runOnce() }));
+  app.use("/api", createRoutes({ store, hub, refresh: () => poller.runOnce(), tz: cfg.tz }));
   app.use(express.static(cfg.staticDir));
   // SPA fallback
   app.get("*", (_req, res) => res.sendFile(path.join(cfg.staticDir, "index.html")));

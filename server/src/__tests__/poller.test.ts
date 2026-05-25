@@ -14,12 +14,14 @@ function rec(period: string, tokens: number, cost: number, agent = "all"): Usage
 }
 
 describe("computeDerived", () => {
-  // 2026-05-24 is a Sunday → ISO week 21 of 2026.
+  // 2026-05-24 is a Sunday. ccusage weekly anchors at Monday → "2026-05-18".
   const now = new Date(`${TODAY}T12:00:00Z`);
 
-  it("sums today/week/month/all-time correctly", () => {
+  it("sums today/week/month/all-time correctly with ccusage-shaped fixtures", () => {
     const daily   = [rec("2026-05-23", 100, 1), rec("2026-05-24", 200, 2)];
-    const weekly  = [rec("2026-W21", 1000, 10)];
+    // M-A1 (R1.5): weekly periods are ccusage's Monday-anchored YYYY-MM-DD,
+    // NOT YYYY-Www. Fixture matches `npx ccusage weekly --json` output.
+    const weekly  = [rec("2026-05-18", 1000, 10)];
     const monthly = [rec("2026-05", 5000, 50)];
     const d = computeDerived({ daily, weekly, monthly, session: [], blocks: [] }, now);
     expect(d.today).toEqual({ tokens: 200, cost: 2 });
@@ -28,14 +30,16 @@ describe("computeDerived", () => {
     expect(d.allTime).toEqual({ tokens: 300, cost: 3 });
   });
 
-  // Round-1 bug fix #1 — week/month must filter by the current period key,
-  // not sum every record in the bucket array.
-  it("filters week/month to the current period key (regression: bug fix #1)", () => {
+  // Round-1 bug fix #1 + R1.5 bug fix M-A1 combined regression: week/month
+  // filter by the current period key AND that key uses the Monday-anchored
+  // YYYY-MM-DD shape ccusage actually emits (not YYYY-Www).
+  it("filters week/month to the current ccusage-shaped period key", () => {
     const daily   = [rec("2026-05-23", 100, 1), rec("2026-05-24", 200, 2)];
     const weekly  = [
-      rec("2026-W20", 9999, 99),       // last week — must NOT be counted
-      rec("2026-W21", 1000, 10),       // current ISO-week (week of 2026-05-24)
-      rec("2026-W22", 12345, 123),     // future week
+      rec("2026-05-11", 9999, 99),     // last week (Mon-anchor) — must NOT be counted
+      rec("2026-05-18", 1000, 10),     // current week (Monday of week containing 2026-05-24)
+      rec("2026-05-25", 12345, 123),   // next week — must NOT be counted
+      rec("2026-W21", 7777, 77),       // legacy ISO-Www shape — must NOT be counted
     ];
     const monthly = [
       rec("2026-04", 9999, 99),        // last month — must NOT be counted

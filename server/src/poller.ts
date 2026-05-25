@@ -2,7 +2,7 @@ import pLimit from "p-limit";
 import type { Snapshot, UsageRecord, Block, Derived } from "./types.js";
 import type { SnapshotStore } from "./snapshot-store.js";
 import {
-  getTodayKey, getMonthKey, getISOWeekKey,
+  getTodayKey, getMonthKey, getWeekStartKey,
   computeTodayDrivers, computeSnapshotDeltas, previousPeriodKeys,
 } from "./insights/index.js";
 
@@ -40,7 +40,9 @@ export function computeDerived(
   const tz = deps.tz ?? "UTC";
   const todayKey = getTodayKey(now, tz);
   const monthKey = getMonthKey(now, tz);
-  const weekKey = getISOWeekKey(now, tz);
+  // M-A1 (R1.5): ccusage emits weekly periods as Monday-anchored YYYY-MM-DD,
+  // not ISO YYYY-Www. Use the Monday-anchored form so the filter matches.
+  const weekKey = getWeekStartKey(now, tz);
 
   const sum = (rs: UsageRecord[]): { tokens: number; cost: number } => rs.reduce(
     (acc, r) => ({ tokens: acc.tokens + r.totalTokens, cost: acc.cost + r.totalCost }),
@@ -76,7 +78,10 @@ export function computeDerived(
       }).format(new Date(ms));
       return dayKey === todayKey;
     })
-    .map((s) => ({ project: s.project, cost: s.totalCost }));
+    // M-A3 (R1.5): pass through the session's `agent` so computeTodayDrivers
+    // can build a real per-agent rollup (sessions carry "claude"/"codex"
+    // labels; daily records all say "all" — see review §M-A3).
+    .map((s) => ({ agent: s.agent, project: s.project, cost: s.totalCost }));
 
   const todayDrivers = computeTodayDrivers({
     todaysDailyRecords,

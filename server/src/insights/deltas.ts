@@ -5,7 +5,7 @@
 // inversion rule (locked iter1-R2 §2.4) per card.
 
 import type { UsageRecord } from "../types.js";
-import { getISOWeekKey, getMonthKey } from "./period-keys.js";
+import { getWeekStartKey, getMonthKey } from "./period-keys.js";
 
 export interface CardDelta {
   /** Δ as a fraction. `null` when prior period has no data (cold start). */
@@ -80,13 +80,21 @@ export function previousPeriodKeys(now: Date, tz: string): {
   const get = (t: string): string => yParts.find((p) => p.type === t)?.value ?? "";
   const yesterdayKey = `${get("year")}-${get("month")}-${get("day")}`;
 
-  // Previous week / previous month: shift by 7 days / by ~31 days then use TZ-aware key.
+  // Previous week: anchor at last Monday.
   const prevWeek = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
-  const prevMonth = new Date(now.getTime() - 31 * 24 * 3600 * 1000);
+  // Previous month: anchor at the last day of the previous month so we never
+  // land on Feb 28 → "skip Feb" (fixes S1 from the round-1 review).
+  const here = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(now);
+  const here_y = Number(here.find((p) => p.type === "year")?.value ?? "0");
+  const here_m = Number(here.find((p) => p.type === "month")?.value ?? "0");
+  // Day 0 of the current month in UTC = last day of the previous month.
+  const lastDayOfPrevMonth = new Date(Date.UTC(here_y, here_m - 1, 0));
 
   return {
     yesterdayKey,
-    prevWeekKey: getISOWeekKey(prevWeek, tz),
-    prevMonthKey: getMonthKey(prevMonth, tz),
+    prevWeekKey: getWeekStartKey(prevWeek, tz),
+    prevMonthKey: getMonthKey(lastDayOfPrevMonth, tz),
   };
 }

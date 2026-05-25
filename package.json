@@ -2,7 +2,7 @@
   "name": "ccusage-web",
   "version": "0.1.0",
   "private": true,
-  "workspaces": ["server", "web"],
+  "workspaces": ["server", "web", "prototypes/v1"],
   "scripts": {
     "build": "npm run build --workspace=web && npm run build --workspace=server",
     "test": "npm test --workspaces --if-present",

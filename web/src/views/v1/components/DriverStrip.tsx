@@ -58,7 +58,7 @@ export function DriverStrip(props: DriverStripProps): JSX.Element {
       <ul className="flex flex-row flex-wrap items-center gap-y-2 text-sm" role="list">
         {segments.map((s, i) => {
           const label = s.kind === "agent"
-            ? (AGENT_LABEL[toAgentKey(s.seg.name)] ?? s.seg.name)
+            ? agentLabel(s.seg.name)
             : s.seg.name;
           return (
             <li key={s.kind} className="contents">
@@ -85,6 +85,22 @@ export function DriverStrip(props: DriverStripProps): JSX.Element {
       </ul>
     </section>
   );
+}
+
+/**
+ * M-A3 (R1.5): defense-in-depth label. The server-side fix in
+ * `computeTodayDrivers` should already surface real agent names ("claude",
+ * "codex", …), but if anything slips through ("all", "unknown", or any
+ * label not in our token map), we never want the bare word "Unknown" on
+ * the page — that's the literal opposite of "tells the user the driver".
+ */
+function agentLabel(name: string): string {
+  if (!name || name === "all") return "All agents";
+  const k = toAgentKey(name);
+  if (k !== "unknown") return AGENT_LABEL[k];
+  // Unrecognized real-looking name → render the raw label (some users have
+  // niche adapters; better to show the raw string than "Unknown").
+  return name;
 }
 
 // Heuristic: map a model name to its agent so the diamond tints correctly.

@@ -30,6 +30,8 @@ export interface MetricCardV1Props {
   subtitle?: string;
   /** Optional agent-color override for the value tint (used in by-agent view). */
   valueAccent?: string;
+  /** Per-card testid override (e.g. "metric-card-today") for e2e selectors. */
+  testId?: string;
 }
 
 const TONE: Record<DeltaTone, { bg: string; text: string; Icon: typeof ArrowUpRight }> = {
@@ -41,7 +43,7 @@ const TONE: Record<DeltaTone, { bg: string; text: string; Icon: typeof ArrowUpRi
 
 export function MetricCardV1({
   title, value, format, deltaPct, inverted, deltaAbsolute, vsLabel,
-  spark, sparkColor, subtitle, valueAccent,
+  spark, sparkColor, subtitle, valueAccent, testId,
 }: MetricCardV1Props): JSX.Element {
   const mv = useMotionValue(value);
   const display = useTransform(mv, (v: number) => (format === "cost" ? formatCost(v) : formatNumber(v)));
@@ -67,7 +69,7 @@ export function MetricCardV1({
 
   return (
     <Card
-      data-testid="metric-card-v1"
+      data-testid={testId ?? "metric-card-v1"}
       role="figure"
       aria-label={`${title}: ${format === "cost" ? formatCost(value) : formatNumber(value)}, ${d.text} ${vsLabel}`}
       className={cn(

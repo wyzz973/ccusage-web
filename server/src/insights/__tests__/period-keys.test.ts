@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { getTodayKey, getMonthKey, getISOWeekKey } from "../period-keys";
+import {
+  getTodayKey, getMonthKey,
+  getWeekStartKey, getISOWeekNumberKey,
+  getISOWeekKey,
+} from "../period-keys";
 
 describe("getTodayKey", () => {
   it("returns UTC day key by default", () => {
@@ -31,19 +35,49 @@ describe("getMonthKey", () => {
   });
 });
 
-describe("getISOWeekKey", () => {
+describe("getWeekStartKey (M-A1: Monday-anchored YYYY-MM-DD, matches ccusage weekly)", () => {
+  it("returns the Monday of the week containing a Monday", () => {
+    // 2026-05-18 IS a Monday.
+    expect(getWeekStartKey(new Date("2026-05-18T12:00:00Z"), "UTC")).toBe("2026-05-18");
+  });
+
+  it("returns the same Monday for a Wednesday in that week", () => {
+    // 2026-05-20 (Wed) → Mon = 2026-05-18.
+    expect(getWeekStartKey(new Date("2026-05-20T12:00:00Z"), "UTC")).toBe("2026-05-18");
+  });
+
+  it("returns the Monday for a Sunday at the end of the week", () => {
+    // 2026-05-24 (Sun) → still belongs to week starting 2026-05-18.
+    expect(getWeekStartKey(new Date("2026-05-24T23:59:00Z"), "UTC")).toBe("2026-05-18");
+  });
+
+  it("crosses month boundaries cleanly", () => {
+    // 2026-06-01 (Mon) is its own week.
+    expect(getWeekStartKey(new Date("2026-06-01T12:00:00Z"), "UTC")).toBe("2026-06-01");
+    // 2026-05-31 (Sun) belongs to the week starting 2026-05-25 (Mon).
+    expect(getWeekStartKey(new Date("2026-05-31T12:00:00Z"), "UTC")).toBe("2026-05-25");
+  });
+
+  it("honors the target TZ when rolling over local midnight", () => {
+    // 2026-05-25T06:00:00Z = 23:00 PDT on 2026-05-24 (Sun) → Monday is 2026-05-18.
+    expect(getWeekStartKey(new Date("2026-05-25T06:00:00Z"), "America/Los_Angeles")).toBe("2026-05-18");
+  });
+});
+
+describe("getISOWeekNumberKey (legacy YYYY-Www; not used by computeDerived)", () => {
   it("matches the well-known ISO week for a mid-week date", () => {
-    // 2026-05-25 (Mon) is in week 22 of 2026.
-    expect(getISOWeekKey(new Date("2026-05-25T14:23:07Z"), "UTC")).toBe("2026-W22");
+    expect(getISOWeekNumberKey(new Date("2026-05-25T14:23:07Z"), "UTC")).toBe("2026-W22");
   });
 
   it("handles the year-boundary case (Jan 1 in previous year's last week)", () => {
-    // 2027-01-01 is a Friday → ISO week 53 of 2026.
-    expect(getISOWeekKey(new Date("2027-01-01T12:00:00Z"), "UTC")).toBe("2026-W53");
+    expect(getISOWeekNumberKey(new Date("2027-01-01T12:00:00Z"), "UTC")).toBe("2026-W53");
   });
 
   it("handles the year-boundary case (Dec 31 in next year's first week)", () => {
-    // 2024-12-30 (Mon) is in ISO week 1 of 2025.
-    expect(getISOWeekKey(new Date("2024-12-30T12:00:00Z"), "UTC")).toBe("2025-W01");
+    expect(getISOWeekNumberKey(new Date("2024-12-30T12:00:00Z"), "UTC")).toBe("2025-W01");
+  });
+
+  it("getISOWeekKey alias is preserved for back-compat", () => {
+    expect(getISOWeekKey).toBe(getISOWeekNumberKey);
   });
 });

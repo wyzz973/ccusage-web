@@ -48,4 +48,31 @@ describe("DriverStrip", () => {
     fireEvent.click(screen.getByTestId("driver-segment-agent"));
     expect(useV1Store.getState().filters).toEqual([{ kind: "agent", value: "claude" }]);
   });
+
+  // M-A3 (R1.5): never display the bare literal "Unknown" for an agent
+  // segment. ccusage's `daily[].agent === "all"` aggregate sentinel must
+  // render as "All agents", not "Unknown".
+  it("renders 'All agents' instead of 'Unknown' when agent name is 'all'", () => {
+    render(
+      <DriverStrip
+        agent={{ name: "all", pct: 100, costUSD: 5 }}
+        totalCostUSD={5}
+      />,
+    );
+    const seg = screen.getByTestId("driver-segment-agent");
+    expect(seg.textContent).toMatch(/All agents/);
+    expect(seg.textContent).not.toMatch(/^.*Unknown.*$/);
+  });
+
+  it("renders a raw (non-token) name as-is rather than 'Unknown'", () => {
+    render(
+      <DriverStrip
+        agent={{ name: "experimental-adapter", pct: 100, costUSD: 5 }}
+        totalCostUSD={5}
+      />,
+    );
+    const seg = screen.getByTestId("driver-segment-agent");
+    expect(seg.textContent).toMatch(/experimental-adapter/);
+    expect(seg.textContent).not.toMatch(/Unknown/);
+  });
 });

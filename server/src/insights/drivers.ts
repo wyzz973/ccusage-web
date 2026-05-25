@@ -34,8 +34,22 @@ export interface TodayDrivers {
 export interface DriversInputs {
   /** Today's slice of daily records (already filtered to `period === todayKey`). */
   todaysDailyRecords: UsageRecord[];
-  /** Optional per-session contributions to project (Round-2 will populate). */
-  todaysSessions?: Array<{ project?: string | undefined; cost: number }>;
+  /**
+   * Per-session contributions. When sessions carry real agent labels
+   * (e.g. "claude" / "codex"), the agent rollup prefers this source — it
+   * disambiguates ccusage's `agent: "all"` aggregate-sentinel on daily
+   * records, which would otherwise show the user "Unknown 100 %".
+   * Round 2's M6 will also populate `project` here.
+   */
+  todaysSessions?: Array<{
+    agent?: string | undefined;
+    project?: string | undefined;
+    cost: number;
+  }>;
+}
+
+function isRealAgentLabel(s: string | undefined | null): boolean {
+  return !!s && s !== "all" && s !== "unknown" && s.trim() !== "";
 }
 
 export function computeTodayDrivers(input: DriversInputs): TodayDrivers {
@@ -47,10 +61,25 @@ export function computeTodayDrivers(input: DriversInputs): TodayDrivers {
   }
 
   // --- agent rollup ---
+  // M-A3 (R1.5): ccusage emits `daily[].agent === "all"` (aggregate sentinel).
+  // If we roll up by that, the driver strip surfaces "Unknown 100 %". Prefer
+  // per-session attribution when sessions carry real agent labels; fall back
+  // to daily.metadata.agents[0] (single-agent-day hint); fall back to the
+  // raw daily.agent only when nothing better is available.
   const agentTotals = new Map<string, number>();
-  for (const r of records) {
-    const c = Number.isFinite(r.totalCost) ? r.totalCost : 0;
-    agentTotals.set(r.agent, (agentTotals.get(r.agent) ?? 0) + c);
+  const realSessions = (input.todaysSessions ?? []).filter((s) => isRealAgentLabel(s.agent));
+  if (realSessions.length > 0) {
+    for (const s of realSessions) {
+      const c = Number.isFinite(s.cost) ? s.cost : 0;
+      agentTotals.set(s.agent!, (agentTotals.get(s.agent!) ?? 0) + c);
+    }
+  } else {
+    for (const r of records) {
+      const c = Number.isFinite(r.totalCost) ? r.totalCost : 0;
+      const hinted = isRealAgentLabel(r.metadata?.agents?.[0]) ? r.metadata!.agents![0]! : null;
+      const name = hinted ?? r.agent;
+      agentTotals.set(name, (agentTotals.get(name) ?? 0) + c);
+    }
   }
   const agent = topSegment(agentTotals, totalCostUSD);
 
