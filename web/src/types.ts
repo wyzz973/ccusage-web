@@ -10,6 +10,8 @@ export type UsageRecord = {
   modelsUsed: string[];
   modelBreakdowns: ModelBreakdown[];
   metadata?: { agents?: string[]; lastActivity?: string };
+  /** Round-1 additive: project name (Round-2 M6 populates). */
+  project?: string;
 };
 
 export type ModelBreakdown = {
@@ -42,6 +44,8 @@ export type Block = {
   };
 };
 
+export type DriverSegment = { name: string; pct: number; costUSD: number };
+
 export type Derived = {
   today:   { tokens: number; cost: number };
   week:    { tokens: number; cost: number };
@@ -49,6 +53,17 @@ export type Derived = {
   allTime: { tokens: number; cost: number };
   activeBlock: Block | null;
   activeSessionCount: number;
+  todayDrivers?: {
+    agent?: DriverSegment;
+    model?: DriverSegment;
+    project?: DriverSegment;
+    totalCostUSD: number;
+  };
+  deltas?: {
+    today: { pct: number | null; vsLabel: string; current: number; previous: number };
+    week:  { pct: number | null; vsLabel: string; current: number; previous: number };
+    month: { pct: number | null; vsLabel: string; current: number; previous: number };
+  };
 };
 
 export type Snapshot = {

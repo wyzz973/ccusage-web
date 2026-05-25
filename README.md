@@ -21,7 +21,26 @@ open http://localhost:47821
 | `CCUSAGE_TIMEOUT_MS` | `30000` | Per-ccusage-command timeout |
 | `CCUSAGE_AUTO_UPDATE_INTERVAL_MS` | `86400000` | Auto-update interval (24h). `0` disables. |
 | `CCUSAGE_BIN` | `ccusage` | Path to ccusage binary |
-| `TZ` | container default | Timezone for date grouping |
+| `TZ` | `UTC` | IANA timezone for `today`/`this week`/`this month` bucketing. Honors the standard env. |
+| `VITE_DASHBOARD_MODE` | `classic` | Build-time default dashboard mode: `classic` or `v1` (see below). |
+
+## Dashboard modes
+
+ccusage-web ships two side-by-side dashboard implementations.
+
+| Mode | When to use | How to enable |
+|---|---|---|
+| `classic` (default) | Stable two-row layout with a single trend chart. | Default; no action required. |
+| `v1` | Refreshed information architecture: per-agent stack, driver-of-the-day strip, filter chips, virtualized session table, ISO-week/month-correct KPIs. | `?mode=v1` on the URL, or rebuild with `VITE_DASHBOARD_MODE=v1`. |
+
+The URL query param **wins** over the env var, so you can preview v1 on a freshly-built deploy without rebuilding:
+
+```
+http://localhost:47821/?mode=v1
+http://localhost:47821/?mode=classic
+```
+
+V1-mode UI state (view toggle, trend window, trend mode, compare flag) persists under the `ccusage.v1.*` localStorage namespace so toggling between modes never corrupts the other side.
 
 ## How it works
 

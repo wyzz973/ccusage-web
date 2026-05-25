@@ -1,0 +1,20 @@
+/* V1-scoped styles. Applied only when the dashboard is in v1 mode via
+   the `.theme-v1` wrapper class on the root v1 element. Keeps classic
+   mode visually unaffected. */
+
+/* Spec v1.1 §4 — collapse KPI grid to 2×2 below 800px viewport height
+   so the M7 driver strip stays above the fold. Height-based, not
+   width-based, because that's the failure mode the PRD cares about. */
+@media (max-height: 799px) {
+  .theme-v1 .kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* WCAG 2.4.7 — sky-400 focus ring inside v1; never visually competes
+   with the existing classic focus styling. */
+.theme-v1 :focus-visible {
+  outline: 2px solid hsl(199 89% 60%);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
