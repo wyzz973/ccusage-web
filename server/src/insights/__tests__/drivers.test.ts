@@ -64,8 +64,11 @@ describe("computeTodayDrivers", () => {
         { agent: "claude", project: "unknown", cost: 10 },
       ],
     });
+    // M-B1 (R1.5.1): project denominator is now the session-rolled total
+    // *of attributed projects* (60 + 30 = 90), not the daily total (100).
+    // Matches the numerator's source so pct cannot exceed 100 %.
     expect(out.project?.name).toBe("client-a");
-    expect(out.project?.pct).toBe(60);
+    expect(out.project?.pct).toBe(67); // 60 / 90 rounded
   });
 
   it("guards against NaN/Infinity costs", () => {
@@ -102,5 +105,84 @@ describe("computeTodayDrivers", () => {
       }],
     });
     expect(out.agent?.name).toBe("codex");
+  });
+
+  // M-B1 (R1.5.1): regression — session/daily totals legitimately diverge
+  // for the same day in ccusage (different aggregation paths). Mixing a
+  // session-derived numerator with the daily-derived total produced
+  // pct > 100 in the wild (live ~/.claude data: "Claude · 119 %"). Two-part
+  // contract: (1) the per-dimension denominator must match the source the
+  // numerator came from; (2) topSegment clamps 0..100 belt-and-braces.
+  describe("M-B1 (R1.5.1): pct never exceeds 100 even with divergent totals", () => {
+    it("uses session-rolled denominator when agents come from sessions", () => {
+      // Construct the pathological case explicitly:
+      //   sessions: claude=$120, codex=$26  → sumSessions = $146
+      //   daily:    one record of $100 (less than top agent's session cost)
+      // Old code: 120/100 = 120 % (contract violation).
+      // New code: 120/146 ≈ 82 % (matched denominator).
+      const out = computeTodayDrivers({
+        todaysDailyRecords: [rec("all", "2026-05-25", 100)],
+        todaysSessions: [
+          { agent: "claude", cost: 120 },
+          { agent: "codex",  cost:  26 },
+        ],
+      });
+      expect(out.agent?.name).toBe("claude");
+      expect(out.agent?.pct).toBeLessThanOrEqual(100);
+      expect(out.agent?.pct).toBe(82); // 120 / 146 rounded
+    });
+
+    it("clamps pct to <= 100 even if a future denominator mismatch reintroduces the bug", () => {
+      // Force pct > 100 via the model path (daily-numerator + daily-denom,
+      // but with a model breakdown cost > the totalCostUSD — which can happen
+      // if upstream emits cache adjustments that net out at the row level).
+      // Daily totalCost = $10, single model breakdown cost = $50 → would
+      // compute 500 % without the clamp.
+      const out = computeTodayDrivers({
+        todaysDailyRecords: [
+          rec("all", "2026-05-25", 10, [
+            { modelName: "opus", cost: 50, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+          ]),
+        ],
+      });
+      expect(out.model?.pct).toBeLessThanOrEqual(100);
+      expect(out.model?.pct).toBeGreaterThanOrEqual(0);
+    });
+
+    it("uses session-rolled denominator for project segment as well", () => {
+      const out = computeTodayDrivers({
+        todaysDailyRecords: [rec("all", "2026-05-25", 50)],
+        todaysSessions: [
+          { agent: "claude", project: "alpha", cost: 80 },
+          { agent: "claude", project: "beta",  cost: 20 },
+        ],
+      });
+      expect(out.project?.name).toBe("alpha");
+      // 80 / 100 = 80 %, not 80 / 50 = 160 %.
+      expect(out.project?.pct).toBe(80);
+      expect(out.project?.pct).toBeLessThanOrEqual(100);
+    });
+
+    it("every returned segment honors 0 <= pct <= 100, integer (contract from DriverSegment.pct comment)", () => {
+      const out = computeTodayDrivers({
+        todaysDailyRecords: [
+          rec("all", "2026-05-25", 7.55, [
+            { modelName: "opus", cost: 6.13, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+            { modelName: "sonnet", cost: 1.42, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+          ]),
+        ],
+        todaysSessions: [
+          { agent: "claude", project: "ccusage-web", cost: 5.10 },
+          { agent: "codex",  project: "ccusage-web", cost: 2.04 },
+          { agent: "gemini", project: "ledger",      cost: 0.41 },
+        ],
+      });
+      for (const seg of [out.agent, out.model, out.project]) {
+        if (!seg) continue;
+        expect(seg.pct).toBeLessThanOrEqual(100);
+        expect(seg.pct).toBeGreaterThanOrEqual(0);
+        expect(Number.isInteger(seg.pct)).toBe(true);
+      }
+    });
   });
 });

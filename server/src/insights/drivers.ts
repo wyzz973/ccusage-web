@@ -66,13 +66,22 @@ export function computeTodayDrivers(input: DriversInputs): TodayDrivers {
   // per-session attribution when sessions carry real agent labels; fall back
   // to daily.metadata.agents[0] (single-agent-day hint); fall back to the
   // raw daily.agent only when nothing better is available.
+  //
+  // M-B1 (R1.5.1): the numerator's source determines the denominator —
+  // mixing session-derived numerators with daily-derived totals lets pct
+  // exceed 100 % when ccusage's session vs daily sums disagree for the same
+  // day (they legitimately can: session has unique-session granularity,
+  // daily is the upstream aggregator's own rollup with different floor/ceil).
   const agentTotals = new Map<string, number>();
   const realSessions = (input.todaysSessions ?? []).filter((s) => isRealAgentLabel(s.agent));
+  let agentDenominator = totalCostUSD;
   if (realSessions.length > 0) {
     for (const s of realSessions) {
       const c = Number.isFinite(s.cost) ? s.cost : 0;
       agentTotals.set(s.agent!, (agentTotals.get(s.agent!) ?? 0) + c);
     }
+    // Sum of the same source we summed for the numerator.
+    agentDenominator = Array.from(agentTotals.values()).reduce((a, b) => a + b, 0);
   } else {
     for (const r of records) {
       const c = Number.isFinite(r.totalCost) ? r.totalCost : 0;
@@ -81,9 +90,10 @@ export function computeTodayDrivers(input: DriversInputs): TodayDrivers {
       agentTotals.set(name, (agentTotals.get(name) ?? 0) + c);
     }
   }
-  const agent = topSegment(agentTotals, totalCostUSD);
+  const agent = topSegment(agentTotals, agentDenominator);
 
   // --- model rollup ---
+  // Numerator + denominator both from daily; no M-B1 risk here.
   const modelTotals = new Map<string, number>();
   for (const r of records) {
     for (const mb of r.modelBreakdowns ?? []) {
@@ -94,6 +104,7 @@ export function computeTodayDrivers(input: DriversInputs): TodayDrivers {
   const model = topSegment(modelTotals, totalCostUSD);
 
   // --- project rollup (Round-1: usually empty; Round-2: populated by M6) ---
+  // M-B1 (R1.5.1): numerator from sessions → denominator from sessions too.
   let project: DriverSegment | undefined;
   if (input.todaysSessions && input.todaysSessions.length > 0) {
     const projTotals = new Map<string, number>();
@@ -104,7 +115,8 @@ export function computeTodayDrivers(input: DriversInputs): TodayDrivers {
       projTotals.set(name, (projTotals.get(name) ?? 0) + c);
     }
     if (projTotals.size > 0) {
-      project = topSegment(projTotals, totalCostUSD);
+      const projDenominator = Array.from(projTotals.values()).reduce((a, b) => a + b, 0);
+      project = topSegment(projTotals, projDenominator);
     }
   }
 
@@ -126,9 +138,12 @@ function topSegment(totals: Map<string, number>, denominator: number): DriverSeg
     }
   }
   if (topName === "" || topCost <= 0) return undefined;
-  return {
-    name: topName,
-    pct: Math.round((topCost / denominator) * 100),
-    costUSD: topCost,
-  };
+  // M-B1 (R1.5.1): belt-and-braces clamp. The denominator-source-match fix
+  // above is the real correctness fix; this clamp is the safety net so any
+  // future divergence (e.g. a new dimension wired up without matched sums)
+  // still honors the `pct: 0–100, integer` contract documented on
+  // `DriverSegment` (line 22 of this file).
+  const rawPct = Math.round((topCost / denominator) * 100);
+  const pct = Math.min(100, Math.max(0, rawPct));
+  return { name: topName, pct, costUSD: topCost };
 }
