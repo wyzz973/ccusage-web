@@ -71,6 +71,24 @@ export interface SessionFixtureOptions {
    * fallback path. Keyed by `encodedDir`.
    */
   cwdFor?: (encodedDir: string) => string | undefined;
+  /**
+   * R3.1 (R3.13 extension) — per-session line override. Return an array
+   * of partial field objects to merge into the default line shape (one
+   * line per array entry). Each entry's keys override the defaults
+   * (`timestamp`, `sessionId`, `requestId`, `message.id/model/usage`).
+   *
+   * Useful for tests that need:
+   *   - multiple JSONL lines per session file (e.g. R3.13 limit-reset
+   *     wins-the-latest test, where two lines stamp different
+   *     `usage_limit_reset_time` values in the same window)
+   *   - field-level control (`usage_limit_reset_time`, future upstream
+   *     fields) without forking the helper
+   *
+   * When undefined, the helper emits its default single-line content.
+   * Per-line partials shallow-merge into the defaults so callers only
+   * need to specify what they're overriding.
+   */
+  linesFor?: (sessionId: string) => Array<Record<string, unknown>> | undefined;
 }
 
 export interface MockedTree {
@@ -164,22 +182,47 @@ export function mockClaudeProjectsTree(
         // displayName path. Omit when the caller wants the heuristic
         // fallback path tested.
         const cwd = opts.cwdFor ? opts.cwdFor(encodedDir) : undefined;
-        const lineObj: Record<string, unknown> = {
-          timestamp: DEFAULT_TIMESTAMP,
-          version: "1.0.0",
-          sessionId: sid,
-          requestId: `r-${sid}`,
-          message: {
-            id: `m-${sid}`,
-            model: "claude-opus-4-7",
-            usage: {
-              input_tokens: Math.floor(tokens * 0.6),
-              output_tokens: Math.floor(tokens * 0.4),
+        const defaultLine = (): Record<string, unknown> => {
+          const obj: Record<string, unknown> = {
+            timestamp: DEFAULT_TIMESTAMP,
+            version: "1.0.0",
+            sessionId: sid,
+            requestId: `r-${sid}`,
+            message: {
+              id: `m-${sid}`,
+              model: "claude-opus-4-7",
+              usage: {
+                input_tokens: Math.floor(tokens * 0.6),
+                output_tokens: Math.floor(tokens * 0.4),
+              },
             },
-          },
+          };
+          if (cwd) obj.cwd = cwd;
+          return obj;
         };
-        if (cwd) lineObj.cwd = cwd;
-        fileContents.set(file, JSON.stringify(lineObj));
+        // R3.1 — `linesFor` extension: when provided, write one line per
+        // returned partial (merged onto the default). Otherwise emit the
+        // legacy single-line content.
+        const partials = opts.linesFor?.(sid);
+        const lines: string[] = [];
+        if (partials && partials.length > 0) {
+          for (let i = 0; i < partials.length; i++) {
+            const merged = { ...defaultLine(), ...partials[i]! };
+            // Default requestId/messageId need to vary per line so the
+            // parser's `(messageId, requestId)` dedup doesn't collapse
+            // multiple lines into one. Only auto-suffix when the partial
+            // didn't already set them.
+            if (partials[i] && !("requestId" in partials[i]!)) merged.requestId = `r-${sid}-${i}`;
+            const msg = merged.message as Record<string, unknown>;
+            if (msg && !(partials[i] && "message" in partials[i]! && (partials[i]!.message as { id?: unknown }).id)) {
+              merged.message = { ...msg, id: `m-${sid}-${i}` };
+            }
+            lines.push(JSON.stringify(merged));
+          }
+        } else {
+          lines.push(JSON.stringify(defaultLine()));
+        }
+        fileContents.set(file, lines.join("\n"));
       }
     }
   }

@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { parseLine } from "../parser";
 import { runNative } from "../index";
 import { computeLimitResetInsight } from "../../insights/limit-reset";
+import { mockClaudeProjectsTree } from "../../__tests__/helpers/mock-projects-tree";
 import type { Block } from "../../types";
 import type { PricingFinder } from "../pricing";
 
@@ -78,11 +79,10 @@ describe("R3.13 — parser handles usage_limit_reset_time", () => {
 });
 
 describe("R3.13 — buildBlocks stamps usageLimitResetTime on Block (via runNative)", () => {
-  // Use runNative's `files` + `fs` injection (no real disk fixtures) so
-  // the test is hermetic. Note: runNative pegs "now" if passed —
-  // important because the block's window inclusion depends on it.
-
-  const PROJECT = "/tmp/projects/-tmp-test-app";
+  // Per swarm-canonical "use mockClaudeProjectsTree on real-shape data"
+  // rule (team-lead R3.1 brief): exercise the helper, not raw fs
+  // injection. R3.1 added a `linesFor` extension so the helper can
+  // emit multi-line + custom-field JSONL that R3.13 needs.
 
   it("propagates the latest non-null limit-reset stamp from the window", async () => {
     const now = new Date("2026-05-26T10:30:00Z");
@@ -90,25 +90,30 @@ describe("R3.13 — buildBlocks stamps usageLimitResetTime on Block (via runNati
     const reset1 = new Date(now.getTime() + 25 * 60_000).toISOString();
     const reset2 = new Date(now.getTime() + 35 * 60_000).toISOString();
 
-    const file = `${PROJECT}/sess1.jsonl`;
-    const contents = [
-      rawLine({
-        timestamp: new Date(blockStart.getTime() + 1_000).toISOString(),
-        usage_limit_reset_time: reset1,
-        sessionId: "sess1", requestId: "r1", message: { id: "m1", model: "claude-opus-4", usage: { input_tokens: 10, output_tokens: 5 } },
-      }),
-      rawLine({
-        timestamp: new Date(blockStart.getTime() + 2_000).toISOString(),
-        usage_limit_reset_time: reset2,
-        sessionId: "sess1", requestId: "r2", message: { id: "m2", model: "claude-opus-4", usage: { input_tokens: 20, output_tokens: 10 } },
-      }),
-    ].join("\n");
+    const tree = mockClaudeProjectsTree(
+      { "/tmp/projects": { "-tmp-test-app": ["sess1"] } },
+      {
+        linesFor: (sid) => sid === "sess1" ? [
+          // Earlier line stamps reset1
+          {
+            timestamp: new Date(blockStart.getTime() + 1_000).toISOString(),
+            usage_limit_reset_time: reset1,
+          },
+          // Later line stamps reset2 — the latest-wins rule in buildBlocks
+          // must pick this one.
+          {
+            timestamp: new Date(blockStart.getTime() + 2_000).toISOString(),
+            usage_limit_reset_time: reset2,
+          },
+        ] : undefined,
+      },
+    );
 
     const out = await runNative<{ blocks: Block[] }>("blocks", {
-      files: [file],
+      files: tree.files,
       now,
       pricing: pricingStub,
-      fs: { readFileSync: (p) => p === file ? contents : "" },
+      fs: tree.fs,
     });
     const active = out.blocks.find((b) => b.isActive);
     expect(active, "expected an active block from the recent fixture").toBeTruthy();
@@ -117,17 +122,23 @@ describe("R3.13 — buildBlocks stamps usageLimitResetTime on Block (via runNati
 
   it("emits null when no entries in the window carry the field", async () => {
     const now = new Date("2026-05-26T10:30:00Z");
-    const file = `${PROJECT}/sess2.jsonl`;
-    const contents = rawLine({
-      timestamp: new Date(now.getTime() - 5 * 60_000).toISOString(),
-      sessionId: "sess2", requestId: "r1", message: { id: "m1", model: "claude-opus-4", usage: { input_tokens: 10, output_tokens: 5 } },
-    });
+
+    const tree = mockClaudeProjectsTree(
+      { "/tmp/projects": { "-tmp-test-app": ["sess2"] } },
+      {
+        linesFor: (sid) => sid === "sess2" ? [
+          // Single line in the active window, NO usage_limit_reset_time
+          // field. The latest-wins picker should land on `null`.
+          { timestamp: new Date(now.getTime() - 5 * 60_000).toISOString() },
+        ] : undefined,
+      },
+    );
 
     const out = await runNative<{ blocks: Block[] }>("blocks", {
-      files: [file],
+      files: tree.files,
       now,
       pricing: pricingStub,
-      fs: { readFileSync: (p) => p === file ? contents : "" },
+      fs: tree.fs,
     });
     const active = out.blocks.find((b) => b.isActive);
     expect(active, "expected an active block from the recent fixture").toBeTruthy();
