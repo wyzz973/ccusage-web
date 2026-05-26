@@ -38,18 +38,22 @@ function ccusageSession(sessionId: string, agent: string, cost: number): UsageRe
   };
 }
 
-describe("buildSessionProjectMap (R2.2)", () => {
-  it("derives sessionId → canonical from the discovered file tree", () => {
+describe("buildSessionProjectMap (R2.2 + R3 §C)", () => {
+  it("derives sessionId → SessionProjectInfo from the discovered file tree (heuristic source without cwd-sniff)", () => {
     const map = buildSessionProjectMap({
       discover: () => [
         "/u/.claude/projects/-Users-sd3-code-ccusage-web/9f3a00.jsonl",
         "/u/.claude/projects/-Users-sd3-code-ccusage-web/9f3a01.jsonl",
         "/u/.claude/projects/-Users-sd3-code-react-router/abc123.jsonl",
       ],
+      sniffCwd: false, // disable cwd-sniff so we don't try to read real files
     });
-    expect(map.get("9f3a00")).toBe("-Users-sd3-code-ccusage-web");
-    expect(map.get("9f3a01")).toBe("-Users-sd3-code-ccusage-web");
-    expect(map.get("abc123")).toBe("-Users-sd3-code-react-router");
+    expect(map.get("9f3a00")?.canonical).toBe("-Users-sd3-code-ccusage-web");
+    expect(map.get("9f3a01")?.canonical).toBe("-Users-sd3-code-ccusage-web");
+    expect(map.get("abc123")?.canonical).toBe("-Users-sd3-code-react-router");
+    // Without cwd-sniff: heuristic displayName (lossy)
+    expect(map.get("9f3a00")?.displayName).toBe("web"); // heuristic, NOT "ccusage-web"
+    expect(map.get("9f3a00")?.source).toBe("encoded-heuristic");
   });
 
   it("returns empty map when discovery yields nothing", () => {
@@ -65,20 +69,61 @@ describe("buildSessionProjectMap (R2.2)", () => {
   it("skips paths whose canonical resolves to 'unknown'", () => {
     const map = buildSessionProjectMap({
       discover: () => ["/not/a/claude/path/random.jsonl"],
+      sniffCwd: false,
     });
-    // basename is "random" so sessionId is "random"; decodeProject on that
-    // fullPath produces canonical = "/not/a/claude/path/random" (basename fallback) — that's NOT "unknown",
-    // so it's mapped. The strict "unknown" filter is for cases where decoder really gives up.
     expect(map.get("random")).toBeDefined();
+  });
+
+  // R3 §C: cwd-sniff path. Tests against the mocked file tree's fs facade.
+  it("sniffs cwd from each file's first line to produce high-quality displayName (R3 §C)", () => {
+    const fixtures = new Map<string, string>([
+      [
+        "/u/.claude/projects/-Users-sd3-code-ccusage-web/sess-aaa.jsonl",
+        JSON.stringify({ cwd: "/Users/sd3/code/ccusage-web", sessionId: "sess-aaa" }),
+      ],
+      [
+        "/u/.claude/projects/-Users-sd3-code-react-router/sess-bbb.jsonl",
+        JSON.stringify({ cwd: "/Users/sd3/code/react-router", sessionId: "sess-bbb" }),
+      ],
+    ]);
+    const map = buildSessionProjectMap({
+      discover: () => Array.from(fixtures.keys()),
+      readFile: (p) => fixtures.get(p) ?? "",
+      sniffCwd: true,
+    });
+    // The displayName comes from cwd (not the lossy `-`-segment heuristic).
+    expect(map.get("sess-aaa")?.displayName).toBe("ccusage-web"); // not "web"
+    expect(map.get("sess-aaa")?.source).toBe("cwd");
+    expect(map.get("sess-bbb")?.displayName).toBe("react-router");
+    expect(map.get("sess-bbb")?.source).toBe("cwd");
+  });
+
+  it("falls back to encoded-heuristic when the first line has no cwd (R3 §C fallback)", () => {
+    const map = buildSessionProjectMap({
+      discover: () => ["/u/.claude/projects/-Users-sd3-code-ccusage-web/sess-aaa.jsonl"],
+      readFile: () => JSON.stringify({ sessionId: "sess-aaa" /* no cwd */ }),
+      sniffCwd: true,
+    });
+    expect(map.get("sess-aaa")?.displayName).toBe("web"); // lossy heuristic
+    expect(map.get("sess-aaa")?.source).toBe("encoded-heuristic");
+  });
+
+  it("tolerates malformed first-line JSON without throwing", () => {
+    const map = buildSessionProjectMap({
+      discover: () => ["/u/.claude/projects/-x-proj/sess.jsonl"],
+      readFile: () => "{not valid json",
+      sniffCwd: true,
+    });
+    expect(map.get("sess")?.source).toBe("encoded-heuristic"); // graceful fallback
   });
 });
 
 describe("stampProjects ↔ ccusage-shape session records (M-R2-1 closure)", () => {
-  it("stamps project on ccusage-source sessions via the sessionProjectMap", () => {
-    const map = new Map<string, string>([
-      ["sess-aaa", "-Users-sd3-code-ccusage-web"],
-      ["sess-bbb", "-Users-sd3-code-ccusage-web"],
-      ["sess-ccc", "-Users-sd3-code-react-router"],
+  it("stamps project on ccusage-source sessions via the SessionProjectMap (R3 §C richer info)", () => {
+    const map = new Map([
+      ["sess-aaa", { canonical: "-Users-sd3-code-ccusage-web", displayName: "ccusage-web", source: "cwd" as const }],
+      ["sess-bbb", { canonical: "-Users-sd3-code-ccusage-web", displayName: "ccusage-web", source: "cwd" as const }],
+      ["sess-ccc", { canonical: "-Users-sd3-code-react-router", displayName: "react-router", source: "cwd" as const }],
     ]);
     const records = [
       ccusageSession("sess-aaa", "claude", 5),
@@ -90,9 +135,11 @@ describe("stampProjects ↔ ccusage-shape session records (M-R2-1 closure)", () 
 
     // Pass condition (a) from review §2 M-R2-1.
     const withProject = stamped.filter((r) => r.project != null);
-    expect(withProject.length).toBeGreaterThanOrEqual(1);
     expect(withProject.length).toBe(3);
     expect(stamped[0]?.project).toBe("-Users-sd3-code-ccusage-web");
+    // R3 §C: high-quality displayName + source carried through.
+    expect(stamped[0]?.projectDisplay).toBe("ccusage-web");
+    expect(stamped[0]?.projectDisplaySource).toBe("cwd");
     expect(stamped[3]?.project).toBeUndefined();
   });
 
@@ -101,7 +148,9 @@ describe("stampProjects ↔ ccusage-shape session records (M-R2-1 closure)", () 
       ...ccusageSession("sess-native", "claude", 5),
       project: "-already-stamped-by-native-runner",
     };
-    const out = stampProjects([pre], new Map([["sess-native", "-different-from-map"]]));
+    const out = stampProjects([pre], new Map([
+      ["sess-native", { canonical: "-different-from-map", displayName: "different", source: "cwd" as const }],
+    ]));
     expect(out[0]?.project).toBe("-already-stamped-by-native-runner");
   });
 });

@@ -14,8 +14,21 @@ export type UsageRecord = {
    * Round-1 additive: project name decoded from the Claude session path.
    * Populated by the native parser in Round 2 (M6); typically `undefined`
    * in Round 1. Classic UI ignores this field; v1 UI surfaces it.
+   *
+   * Carries the **canonical** form (encoded `-Users-…-ccusage-web`),
+   * suitable as a stable filter-chip identity. The short label is in
+   * `projectDisplay` (R3 §C).
    */
   project?: string;
+  /**
+   * R3 §C: short human label for the project chip. Derived from the
+   * line's `cwd` field when available (high-quality); falls back to the
+   * trailing-`-`-segment heuristic on the canonical (R2 behavior;
+   * known-lossy when project names contain `-`).
+   */
+  projectDisplay?: string;
+  /** R3 §C: provenance of `projectDisplay`. UI renders a hint when "encoded-heuristic". */
+  projectDisplaySource?: "cwd" | "encoded-heuristic" | "absent";
 };
 
 export type ModelBreakdown = {
@@ -71,10 +84,12 @@ export type Derived = {
     week:  { pct: number | null; vsLabel: string; current: number; previous: number };
     month: { pct: number | null; vsLabel: string; current: number; previous: number };
   };
-  /** R2 D1 — top projects rollup. */
+  /** R2 D1 — top projects rollup. R3 §C adds `displayNameSource`. */
   projects?: Array<{
     canonical: string;
     displayName: string;
+    /** R3 §C: "cwd" | "encoded-heuristic" | "absent". UI hint when lossy. */
+    displayNameSource?: "cwd" | "encoded-heuristic" | "absent";
     cost: number;
     tokens: number;
     sessions: number;

@@ -40,18 +40,25 @@ describe("stampProjects (R2 S4 + R2.2 M-R2-1)", () => {
   });
 
   // R2.2 M-R2-1 closure for the ccusage source path: the new sessionId-→-
-  // canonical map fills the gap where ccusage's --json output has no
-  // file-path / project signal of its own.
-  it("stamps from the sessionId→canonical map when ccusage source has no metadata hint", () => {
+  // info map fills the gap where ccusage's --json output has no
+  // file-path / project signal of its own. R3 §C: map now carries the
+  // full info triple {canonical, displayName, source}.
+  it("stamps from the sessionId map when ccusage source has no metadata hint", () => {
     const a = sess({ period: "9f3a00" });
-    const map = new Map([["9f3a00", "-Users-x-alpha"]]);
+    const map = new Map([
+      ["9f3a00", { canonical: "-Users-x-alpha", displayName: "alpha", source: "cwd" as const }],
+    ]);
     const out = stampProjects([a], map);
     expect(out[0]?.project).toBe("-Users-x-alpha");
+    expect(out[0]?.projectDisplay).toBe("alpha");
+    expect(out[0]?.projectDisplaySource).toBe("cwd");
   });
 
   it("prefers the already-stamped project (native pre-stamp) over the map", () => {
     const a = sess({ period: "9f3a00", project: "-native-pre-stamped" });
-    const map = new Map([["9f3a00", "-from-the-map"]]);
+    const map = new Map([
+      ["9f3a00", { canonical: "-from-the-map", displayName: "different", source: "cwd" as const }],
+    ]);
     const out = stampProjects([a], map);
     expect(out[0]?.project).toBe("-native-pre-stamped");
   });

@@ -64,10 +64,12 @@ export type Derived = {
     week:  { pct: number | null; vsLabel: string; current: number; previous: number };
     month: { pct: number | null; vsLabel: string; current: number; previous: number };
   };
-  /** R2 D1 — top projects rollup. */
+  /** R2 D1 — top projects rollup. R3 §C adds `displayNameSource`. */
   projects?: Array<{
     canonical: string;
     displayName: string;
+    /** R3 §C: "cwd" | "encoded-heuristic" | "absent". UI hint when lossy. */
+    displayNameSource?: "cwd" | "encoded-heuristic" | "absent";
     cost: number;
     tokens: number;
     sessions: number;

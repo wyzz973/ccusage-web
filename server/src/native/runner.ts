@@ -238,7 +238,12 @@ function bucketBySession(perFile: FileBundle[]): UsageRecord[] {
     for (const e of fb.result.entries) {
       if (e.timestampMs > lastActivityMs) lastActivityMs = e.timestampMs;
     }
-    const decoded = decodeProject({ fullPath: fb.file });
+    // R3 §C: sample the first entry's `cwd` (CC log lines always carry
+    // it per `NULL_FORBIDDEN_FIELDS`; cwd is per-session-stable so the
+    // first occurrence is sufficient). When absent, decodeProject falls
+    // back to the R1/R2 trailing-`-`-segment heuristic.
+    const sampleCwd = fb.result.entries[0]?.cwd;
+    const decoded = decodeProject({ fullPath: fb.file, cwd: sampleCwd });
     const project = decoded.canonical === "unknown" ? undefined : decoded.canonical;
     const record: UsageRecord = {
       period: sessionId,
@@ -255,6 +260,8 @@ function bucketBySession(perFile: FileBundle[]): UsageRecord[] {
         ? { lastActivity: new Date(lastActivityMs).toISOString() }
         : {},
       project,
+      projectDisplay: project ? decoded.displayName : undefined,
+      projectDisplaySource: project ? decoded.displayNameSource : undefined,
     };
     out.push(record);
   }

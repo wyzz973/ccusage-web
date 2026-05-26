@@ -46,6 +46,15 @@ export interface RawUsageEntry {
   timestamp: string;
   costUSD?: number | null;
   isApiErrorMessage?: boolean;
+  /**
+   * R3 §C: absolute on-disk working directory for the Claude Code
+   * session. Always present + non-null on real CC log lines (per
+   * iter0-R1 §3 — `cwd` is in `NULL_FORBIDDEN_FIELDS`). Used as the
+   * unambiguous source for `displayName` in `decodeProject` —
+   * disambiguates `ccusage-web` from path-segment-boundary `ccusage/web`
+   * that the encoded `-`-joined form can't tell apart.
+   */
+  cwd?: string;
   message: {
     id?: string;
     model?: string;
@@ -93,6 +102,13 @@ export interface CookedEntry {
    * value depending on `LoadOptions.mode`.
    */
   rawCostUSD?: number | null;
+  /**
+   * R3 §C: working directory from the JSONL line. Used by the runner to
+   * compute a high-quality `displayName` for the project chip — closes
+   * the R1 S3 / R2 S-R2-7 ambiguity where `ccusage-web` and `web`
+   * couldn't be told apart from the encoded form alone.
+   */
+  cwd?: string;
   /**
    * R2.2 (M-R2-1): source file path, used by the runner to stamp
    * `UsageRecord.project` via `decodeProject(filePath)`. Only set when
@@ -195,6 +211,7 @@ export function parseLine(line: string, pricing: PricingFinder, opts: ParseLineO
     speed: u.speed,
     costUSD,
     rawCostUSD: raw.costUSD,
+    cwd: typeof raw.cwd === "string" && raw.cwd.trim() !== "" ? raw.cwd : undefined,
     filePath: opts.filePath,
   };
 }

@@ -64,6 +64,13 @@ export interface SessionFixtureOptions {
    * Per-session tokens override. Defaults to 1000.
    */
   tokensFor?: (sessionId: string) => number;
+  /**
+   * R3 §C — `cwd` value emitted in the JSONL fixture content per
+   * encoded project dir. Tests that exercise the cwd-sniff displayName
+   * path provide this; omitting it exercises the encoded-heuristic
+   * fallback path. Keyed by `encodedDir`.
+   */
+  cwdFor?: (encodedDir: string) => string | undefined;
 }
 
 export interface MockedTree {
@@ -153,7 +160,11 @@ export function mockClaudeProjectsTree(
         // `cost` above — that's fine; the native runner emits its own
         // costs from the JSONL content, while the `sessionRecords`
         // bundle here is for the ccusage-mode `stampProjects` join path.
-        const jsonl = JSON.stringify({
+        // R3 §C: include `cwd` so cwd-sniff exercises the high-quality
+        // displayName path. Omit when the caller wants the heuristic
+        // fallback path tested.
+        const cwd = opts.cwdFor ? opts.cwdFor(encodedDir) : undefined;
+        const lineObj: Record<string, unknown> = {
           timestamp: DEFAULT_TIMESTAMP,
           version: "1.0.0",
           sessionId: sid,
@@ -166,8 +177,9 @@ export function mockClaudeProjectsTree(
               output_tokens: Math.floor(tokens * 0.4),
             },
           },
-        });
-        fileContents.set(file, jsonl);
+        };
+        if (cwd) lineObj.cwd = cwd;
+        fileContents.set(file, JSON.stringify(lineObj));
       }
     }
   }

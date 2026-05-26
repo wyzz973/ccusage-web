@@ -10,7 +10,7 @@ export {
   getISOWeekKey, // deprecated alias, retained for back-compat
 } from "./period-keys.js";
 export { extractProject, decodeProject } from "./project.js";
-export type { ExtractProjectInput, DecodedProject } from "./project.js";
+export type { ExtractProjectInput, DecodedProject, DisplayNameSource } from "./project.js";
 export { computeProjectRollups } from "./projects.js";
 export type { ProjectRollup, ProjectsInputs } from "./projects.js";
 export { computeCacheInsight } from "./cache.js";

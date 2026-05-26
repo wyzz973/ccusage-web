@@ -1,4 +1,5 @@
 import pLimit from "p-limit";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Snapshot, UsageRecord, Block, Derived } from "./types.js";
 import type { SnapshotStore } from "./snapshot-store.js";
@@ -7,6 +8,7 @@ import {
   computeTodayDrivers, computeSnapshotDeltas, previousPeriodKeys,
   computeProjectRollups, computeCacheInsight, computeLimitResetInsight,
   decodeProject,
+  type DisplayNameSource,
 } from "./insights/index.js";
 import { discoverJsonlFiles } from "./native/paths.js";
 
@@ -126,61 +128,123 @@ export function computeDerived(
 }
 
 /**
- * R2 S4 / R2.2 M-R2-1 — stamp `record.project` on every session record so
- * the insights + UI layers don't have to re-derive from filename.
+ * R3 §C: richer per-session project info than just the canonical string.
+ * Includes the displayName + source so the UI can render a "ⓘ" hint when
+ * the value came from the lossy heuristic instead of a real `cwd` sniff.
+ */
+export interface SessionProjectInfo {
+  canonical: string;
+  displayName: string;
+  source: DisplayNameSource;
+}
+export type SessionProjectMap = Map<string, SessionProjectInfo>;
+
+/**
+ * R2 S4 / R2.2 M-R2-1 / R3 §C — stamp `record.project` (+ display +
+ * source) on every session record so the insights + UI layers don't
+ * have to re-derive from filename.
  *
  * Sources, in order of preference:
  *   1. Records that already carry `project` (the native runner pre-stamps
  *      now — see `native/runner.ts.bucketBySession`).
- *   2. The `sessionIdToProject` map (built by the caller from a discovered
- *      `~/.claude/projects/**` walk) — keyed by `record.period` which holds
- *      ccusage's session id. **This is what closes M-R2-1 for the ccusage
- *      source**, which otherwise has no file-path signal in its `--json`.
- *   3. `metadata.project` upstream hint (if a future ccusage version
- *      surfaces one).
+ *   2. The `sessionIdToInfo` map (built by the caller from a discovered
+ *      `~/.claude/projects/**` walk + per-file cwd-sniff). This is what
+ *      closes M-R2-1 for the ccusage source (which has no file-path
+ *      signal in its `--json`) and powers the §C cwd-derived displayName.
+ *   3. `metadata.project` upstream hint (future-proof).
  *   4. `undefined` (the rollup treats this as the absent state).
  */
 export function stampProjects(
   records: UsageRecord[],
-  sessionIdToProject: Map<string, string> = new Map(),
+  sessionIdToInfo: SessionProjectMap = new Map(),
 ): UsageRecord[] {
   return records.map((r) => {
     if (r.project != null && r.project !== "") return r;
-    // (2) sessionId → canonical map built from a `~/.claude/projects/` walk.
-    const fromMap = sessionIdToProject.get(r.period);
-    if (fromMap) return { ...r, project: fromMap };
+    // (2) sessionId → SessionProjectInfo map built from a fs walk + cwd-sniff.
+    const info = sessionIdToInfo.get(r.period);
+    if (info) {
+      return {
+        ...r,
+        project: info.canonical,
+        projectDisplay: info.displayName,
+        projectDisplaySource: info.source,
+      };
+    }
     // (3) future-proof: optional `metadata.project` upstream hint.
     const meta = r.metadata as (Record<string, unknown> | undefined);
     const upstream = meta && typeof meta["project"] === "string" ? (meta["project"] as string) : null;
     if (upstream && upstream !== "") {
       const dec = decodeProject(upstream);
-      return { ...r, project: dec.canonical };
+      return {
+        ...r,
+        project: dec.canonical,
+        projectDisplay: dec.displayName,
+        projectDisplaySource: dec.displayNameSource,
+      };
     }
     return r;
   });
 }
 
 /**
- * R2.2 — walk the on-disk projects tree and build a `<sessionId> →
- * <canonical-project>` map. Called per-poll. Pluggable filesystem +
- * discovery for tests. When the discovery yields no files (no
- * `~/.claude/projects/` on the host), the map is empty and
- * `stampProjects` no-ops gracefully.
+ * R2.2 + R3 §C — walk the on-disk projects tree and build a
+ * `<sessionId> → SessionProjectInfo` map. Called per-poll.
+ *
+ * R3 §C extension: optionally sniff each file's first line for the
+ * `cwd` field so the displayName is high-quality (`ccusage-web` rather
+ * than the lossy `web` heuristic). The sniff is gated by
+ * `sniffCwd: true` (default; pass `false` in tests that don't need the
+ * filesystem read). At most one read per discovered file — cheap; aligns
+ * with the "cache at top of runOnce" pattern from R2.2's perf shape.
+ *
+ * Pluggable `discover` + `readFile` for tests.
  */
 export interface ProjectMapDeps {
   discover?: () => string[];
+  /** R3 §C: per-file first-line reader. Defaults to fs.readFileSync. */
+  readFile?: (path: string) => string;
+  /** R3 §C: enable cwd-sniff. Default true. Disable in unit tests that don't need it. */
+  sniffCwd?: boolean;
 }
-export function buildSessionProjectMap(deps: ProjectMapDeps = {}): Map<string, string> {
+export function buildSessionProjectMap(deps: ProjectMapDeps = {}): SessionProjectMap {
   const discover = deps.discover ?? discoverJsonlFiles;
-  const out = new Map<string, string>();
+  const readFile = deps.readFile ?? ((p: string): string => {
+    try { return fs.readFileSync(p, "utf8"); } catch { return ""; }
+  });
+  const sniffCwd = deps.sniffCwd !== false;
+  const out: SessionProjectMap = new Map();
   let files: string[] = [];
   try { files = discover(); } catch { /* discovery may throw on unusual fs configs */ }
   for (const file of files) {
     const sessionId = path.basename(file, ".jsonl");
     if (!sessionId) continue;
-    const dec = decodeProject({ fullPath: file });
+    // R3 §C cwd-sniff: read just enough to find the first JSON line and
+    // pull `cwd`. Bail early if the file is huge — we only need one line.
+    let cwd: string | undefined;
+    if (sniffCwd) {
+      try {
+        const text = readFile(file);
+        if (text) {
+          const firstNewline = text.indexOf("\n");
+          const firstLine = firstNewline >= 0 ? text.slice(0, firstNewline) : text;
+          if (firstLine.trim()) {
+            try {
+              const parsed = JSON.parse(firstLine) as { cwd?: unknown };
+              if (typeof parsed.cwd === "string" && parsed.cwd.trim() !== "") {
+                cwd = parsed.cwd;
+              }
+            } catch { /* malformed first line — skip cwd, fall through to heuristic */ }
+          }
+        }
+      } catch { /* unreadable file — skip cwd */ }
+    }
+    const dec = decodeProject({ fullPath: file, cwd });
     if (dec.canonical && dec.canonical !== "unknown") {
-      out.set(sessionId, dec.canonical);
+      out.set(sessionId, {
+        canonical: dec.canonical,
+        displayName: dec.displayName,
+        source: dec.displayNameSource,
+      });
     }
   }
   return out;
