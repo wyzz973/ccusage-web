@@ -4,10 +4,10 @@ import {
 } from "recharts";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { cn, formatCost } from "@/lib/utils";
-import { AGENT_COLORS, AGENT_LABEL, SEMANTIC } from "../lib/agent-colors";
+import { AGENT_COLORS, AGENT_LABEL, SEMANTIC, toAgentKey } from "../lib/agent-colors";
 import { useV1Store, type TrendMode, formatRangeLabel } from "../data/v1-store";
 import { selectTrendSeries, selectDailyInRange } from "../data/selectors";
-import { fetchHourly, type HourlyBucket } from "@/lib/api";
+import { fetchHourly, fetchPerAgent, type HourlyBucket, type PerAgentResponse } from "@/lib/api";
 import type { UsageRecord } from "@/types";
 
 const MODE_OPTIONS: { value: TrendMode; label: string }[] = [
@@ -40,6 +40,8 @@ export interface TrendChartV1Props {
   tz?: string;
   /** Override the hourly fetcher in tests so we don't hit the real endpoint. */
   hourlyFetcher?: (date: string, tz: string) => Promise<{ buckets: HourlyBucket[] }>;
+  /** R3.6 — override the per-agent fetcher in tests (avoid hitting /api/per-agent). */
+  perAgentFetcher?: (date: string, tz: string) => Promise<PerAgentResponse>;
 }
 
 function browserTodayKey(tz: string): string {
@@ -57,7 +59,7 @@ function browserHour(tz: string): number {
 }
 
 export function TrendChartV1({
-  records, onPickAgent, onPickDate, todayKey, tz, hourlyFetcher,
+  records, onPickAgent, onPickDate, todayKey, tz, hourlyFetcher, perAgentFetcher,
 }: TrendChartV1Props): JSX.Element {
   // R2 D2: range picker (in B0) is the single source of truth — the old
   // Today/7/30/60/90 tabs are gone per spec-v2 §3.3.6.
@@ -65,6 +67,11 @@ export function TrendChartV1({
   const mode = useV1Store((s) => s.trendMode);
   const setMode = useV1Store((s) => s.setTrendMode);
   const compareOn = useV1Store((s) => s.compareOn);
+  // R3.6 — per-agent state machine. View toggle drives the fan-out fire.
+  const view = useV1Store((s) => s.view);
+  const perAgent = useV1Store((s) => s.perAgent);
+  const setPerAgent = useV1Store((s) => s.setPerAgent);
+  const setPerAgentLoading = useV1Store((s) => s.setPerAgentLoading);
 
   const resolvedTz = tz ?? (typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC");
   const resolvedToday = todayKey ?? browserTodayKey(resolvedTz);
@@ -109,6 +116,44 @@ export function TrendChartV1({
       });
     return () => { cancelled = true; };
   }, [isToday, resolvedToday, resolvedTz, hourlyFetcher]);
+
+  // R3.6 — per-agent fan-out. Fires once when view flips to "by-agent";
+  // re-fires if the today key changes (midnight rollover) or the TZ moves.
+  //
+  // CRITICAL: `setPerAgentLoading()` runs SYNCHRONOUSLY before the await
+  // so the 100ms skeleton gate (spec-v3 §1.4) renders BEFORE the server
+  // round-trip. The fetcher is awaited after; do not move the loading
+  // setter into the .then() — that re-introduces the silent-fail shape.
+  useEffect(() => {
+    if (view !== "by-agent") return;
+    let cancelled = false;
+    const fetcher = perAgentFetcher ?? fetchPerAgent;
+    setPerAgentLoading();
+    fetcher(resolvedToday, resolvedTz)
+      .then((r) => {
+        if (cancelled) return;
+        setPerAgent({
+          status: r.status,
+          succeeded: r.succeeded,
+          failed: r.failed.map((f) => ({ agent: f.agent, err: String((f.err as { message?: string }).message ?? f.err) })),
+          timedOut: r.timedOut,
+          elapsedMs: r.elapsedMs,
+          budgetMs: r.budgetMs,
+        });
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setPerAgent({
+          status: "timeout",
+          succeeded: [], failed: [],
+          timedOut: [],
+          elapsedMs: 0, budgetMs: 800,
+        });
+        // Swallow — the state machine already reflects the failure.
+        void e;
+      });
+    return () => { cancelled = true; };
+  }, [view, resolvedToday, resolvedTz, perAgentFetcher, setPerAgent, setPerAgentLoading]);
 
   return (
     <Card data-testid="trend-chart-v1">
@@ -295,18 +340,66 @@ export function TrendChartV1({
 
       {agents.length > 0 && (
         <div className="px-4 pb-3 -mt-1 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted-foreground">
-          {agents.map((a) => (
-            <button
-              key={a}
-              type="button"
-              onClick={() => onPickAgent?.(a)}
-              className="inline-flex items-center gap-1.5 rounded px-1 hover:text-foreground"
-              aria-label={`Filter to ${AGENT_LABEL[a]}`}
-            >
-              <span className="h-2.5 w-2.5 rounded-full" style={{ background: AGENT_COLORS[a] }} aria-hidden="true" />
-              <span>{AGENT_LABEL[a]}</span>
-            </button>
-          ))}
+          {agents.map((a) => {
+            // R3.6 §3.2.3 — per-agent failure decoration: line-through + tooltip
+            // when the agent landed in `failed[]` or `timedOut[]` from the
+            // last fan-out. Distinct visual from the success state so the
+            // user can see which agents we couldn't render.
+            const failedEntry = perAgent.failed.find((f) => toAgentKey(f.agent) === a);
+            const timedOutEntry = perAgent.timedOut.find((t) => toAgentKey(t.agent) === a);
+            const decorated = view === "by-agent" && (failedEntry != null || timedOutEntry != null);
+            const tip = failedEntry
+              ? `Per-agent fetch failed: ${failedEntry.err}`
+              : timedOutEntry
+              ? `Per-agent fetch timed out after ${perAgent.budgetMs}ms`
+              : undefined;
+            return (
+              <button
+                key={a}
+                type="button"
+                onClick={() => onPickAgent?.(a)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded px-1 hover:text-foreground",
+                  decorated && "line-through opacity-60",
+                )}
+                aria-label={`Filter to ${AGENT_LABEL[a]}`}
+                title={tip}
+                data-testid={`trend-legend-${a}`}
+              >
+                <span className="h-2.5 w-2.5 rounded-full" style={{ background: AGENT_COLORS[a] }} aria-hidden="true" />
+                <span>{AGENT_LABEL[a]}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* R3.6 §3.2 state-machine footer. Visible only in "by-agent" view;
+          surfaces partial-success + all-timeout outcomes so the user is
+          never silently looking at a degraded chart. */}
+      {view === "by-agent" && perAgent.status !== "idle" && perAgent.status !== "ok" && (
+        <div
+          data-testid="per-agent-status"
+          className={cn(
+            "mx-4 mb-3 -mt-1 rounded-md border px-3 py-1.5 text-[11px]",
+            perAgent.status === "loading" && "border-border bg-muted/30 text-muted-foreground",
+            perAgent.status === "partial" && "border-amber-400/40 bg-amber-400/5 text-amber-200",
+            perAgent.status === "timeout" && "border-rose-400/40 bg-rose-400/5 text-rose-200",
+          )}
+          role="status"
+          aria-live="polite"
+        >
+          {perAgent.status === "loading" && "Fetching per-agent breakdown…"}
+          {perAgent.status === "partial" && (
+            <>
+              Showing {perAgent.succeeded.length} of {perAgent.succeeded.length + perAgent.failed.length + perAgent.timedOut.length} agents
+              {perAgent.timedOut.length > 0 && ` · ${perAgent.timedOut.length} timed out at ${perAgent.budgetMs}ms`}
+              {perAgent.failed.length > 0 && ` · ${perAgent.failed.length} failed`}
+            </>
+          )}
+          {perAgent.status === "timeout" && (
+            <>Per-agent breakdown unavailable (all {perAgent.timedOut.length + perAgent.failed.length} agents missed the {perAgent.budgetMs}ms budget). Showing aggregate.</>
+          )}
         </div>
       )}
     </Card>

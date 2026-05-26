@@ -2,14 +2,22 @@ import { useMemo } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCost } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { formatPct } from "../lib/format";
 import { AGENT_COLORS, AGENT_LABEL, toAgentKey } from "../lib/agent-colors";
+import { useV1Store } from "../data/v1-store";
 import type { UsageRecord } from "@/types";
 
 // B4-L · Model-mix donut. Click slice → addFilter (parent wires).
+//
+// R3.8 — scope toggle: "window" sums `inRangeDaily` (B0 range picker);
+// "all" sums `allDaily` (lifetime). Caller passes both so the donut can
+// switch without re-fetching. Default = window (matches B0 semantics).
 export interface ModelDonutV1Props {
   records: UsageRecord[];
   onPickModel?: (modelName: string) => void;
+  /** R3.8 — lifetime records for the "All-time" scope. Optional; toggle hidden if absent. */
+  allRecords?: UsageRecord[];
 }
 
 interface Slice {
@@ -18,10 +26,19 @@ interface Slice {
   cost: number;
 }
 
-export function ModelDonutV1({ records, onPickModel }: ModelDonutV1Props): JSX.Element {
+export function ModelDonutV1({ records, onPickModel, allRecords }: ModelDonutV1Props): JSX.Element {
+  const scope = useV1Store((s) => s.donutScope);
+  const setScope = useV1Store((s) => s.setDonutScope);
+  // R3.8 — pick the active record set based on scope. If `allRecords`
+  // isn't supplied (legacy caller), the toggle is hidden and we behave
+  // like the pre-R3.8 donut (whatever `records` is).
+  const haveLifetime = Array.isArray(allRecords);
+  const effectiveScope = haveLifetime ? scope : "window";
+  const activeRecords = effectiveScope === "all" && allRecords ? allRecords : records;
+
   const slices = useMemo<Slice[]>(() => {
     const acc = new Map<string, Slice>();
-    for (const r of records) {
+    for (const r of activeRecords) {
       for (const mb of r.modelBreakdowns ?? []) {
         if (mb.cost <= 0) continue;
         const cur = acc.get(mb.modelName) ?? { name: mb.modelName, agent: toAgentKey(r.agent), cost: 0 };
@@ -30,7 +47,7 @@ export function ModelDonutV1({ records, onPickModel }: ModelDonutV1Props): JSX.E
       }
     }
     return Array.from(acc.values()).sort((a, b) => b.cost - a.cost);
-  }, [records]);
+  }, [activeRecords]);
 
   const total = slices.reduce((s, x) => s + x.cost, 0);
 
@@ -38,7 +55,33 @@ export function ModelDonutV1({ records, onPickModel }: ModelDonutV1Props): JSX.E
     <Card data-testid="model-donut-v1">
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-base text-foreground">Model mix</CardTitle>
-        <span className="text-[11px] text-muted-foreground">All daily records</span>
+        {haveLifetime ? (
+          <div
+            role="radiogroup"
+            aria-label="Model donut scope"
+            data-testid="donut-scope-toggle"
+            className="inline-flex rounded-md border border-border p-0.5 text-[11px]"
+          >
+            {(["window", "all"] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                role="radio"
+                aria-checked={effectiveScope === s}
+                onClick={() => setScope(s)}
+                data-testid={`donut-scope-${s}`}
+                className={cn(
+                  "rounded px-2 py-0.5",
+                  effectiveScope === s ? "bg-zinc-800 text-zinc-50" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {s === "window" ? "Window" : "All-time"}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span className="text-[11px] text-muted-foreground">All daily records</span>
+        )}
       </CardHeader>
       <CardContent className="grid grid-cols-2 gap-4">
         <div className="relative h-48">

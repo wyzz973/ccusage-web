@@ -45,7 +45,37 @@ export interface ModeState {
   offline: boolean;
   nativeParser: boolean;
   timezone: string;
+  /**
+   * R3.7 — monthly USD cap. `null` = no cap; banner never fires. Stored
+   * client-side because it's a user policy preference, not server data.
+   */
+  monthlyCapUSD: number | null;
+  /**
+   * R3.7 — per-block token cap (X1 chip in BlockHistoryStrip).
+   * `null` = no cap; chip never fires.
+   */
+  perBlockTokenLimit: number | null;
 }
+
+// R3.6 — per-agent fan-out result (spec-v3 §3.2 state machine).
+export type PerAgentStatus = "idle" | "loading" | "ok" | "partial" | "timeout";
+
+export interface PerAgentAgentData {
+  totalCostUSD: number;
+  totalTokens: number;
+  sessionCount: number;
+}
+export interface PerAgentResult {
+  status: PerAgentStatus;
+  succeeded: Array<{ agent: string; data: PerAgentAgentData }>;
+  failed:    Array<{ agent: string; err: string }>;
+  timedOut:  Array<{ agent: string }>;
+  elapsedMs: number;
+  budgetMs: number;
+}
+
+// R3.8 — donut window scope: "window" = the selected B0 range; "all" = lifetime.
+export type DonutScope = "window" | "all";
 
 interface V1State {
   view: ViewMode;
@@ -69,6 +99,15 @@ interface V1State {
   // R2 D9 (UI-side dismiss)
   limitResetDismissed: boolean;
 
+  // R3.7 — UI-side dismiss for the budget banner (today-only; resets daily).
+  x1BannerDismissedFor: string | null;
+
+  // R3.8 — donut window scope toggle.
+  donutScope: DonutScope;
+
+  // R3.6 — per-agent fan-out state. Populated by `fetchPerAgent` calls.
+  perAgent: PerAgentResult;
+
   setView(v: ViewMode): void;
   addFilter(c: FilterChip): void;
   removeFilter(c: FilterChip): void;
@@ -90,6 +129,20 @@ interface V1State {
 
   dismissLimitReset(): void;
   resetLimitResetDismiss(): void;
+
+  // R3.7 — banner dismiss is scoped to a single calendar day so the user
+  // doesn't suppress next month's warning by accident.
+  dismissX1BannerToday(today: string): void;
+
+  // R3.8
+  setDonutScope(s: DonutScope): void;
+
+  // R3.6 — per-agent state machine transitions. Components call
+  // `setPerAgent("loading")` synchronously before the fetch hop so the
+  // 100ms skeleton gate (spec-v3 §1.4) renders immediately.
+  setPerAgent(state: PerAgentResult): void;
+  setPerAgentLoading(): void;
+  resetPerAgent(): void;
 }
 
 const LS = {
@@ -106,6 +159,12 @@ const LS = {
   offline: "ccusage.offline",
   nativeParser: "ccusage.native",
   tz: "ccusage.tz",
+  // R3.7 — budget prefs are also cross-mode (the cap is a user policy,
+  // not v1-UI state). PRD-literal keys: `ccusage.budget.cap` + `.tokenLimit`.
+  monthlyCapUSD: "ccusage.budget.cap",
+  perBlockTokenLimit: "ccusage.budget.tokenLimit",
+  // R3.8 — donut scope persists across reloads.
+  donutScope: "ccusage.v1.donut.scope",
 } as const;
 
 const VALID_VIEW = new Set<ViewMode>(["aggregate", "by-agent"]);
@@ -113,6 +172,13 @@ const VALID_WINDOW = new Set<TrendWindow>(["today", "7", "30", "60", "90"]);
 const VALID_MODE = new Set<TrendMode>(["aggregate", "stacked", "100", "lines"]);
 const VALID_PRESET = new Set<RangePreset>(["today", "7d", "30d", "90d", "this-mo", "last-mo", "custom"]);
 const VALID_COST_MODE = new Set<CostMode>(["calculate", "auto", "display"]);
+const VALID_DONUT_SCOPE = new Set<DonutScope>(["window", "all"]);
+
+function parseFiniteNumber(s: string): number | null {
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -129,7 +195,14 @@ function defaultRange(): Range {
 
 function defaultMode(): ModeState {
   const tz = (typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC") || "UTC";
-  return { costMode: "calculate", offline: false, nativeParser: false, timezone: tz };
+  return {
+    costMode: "calculate", offline: false, nativeParser: false, timezone: tz,
+    monthlyCapUSD: null, perBlockTokenLimit: null,
+  };
+}
+
+function defaultPerAgent(): PerAgentResult {
+  return { status: "idle", succeeded: [], failed: [], timedOut: [], elapsedMs: 0, budgetMs: 800 };
 }
 
 function chipKey(c: FilterChip): string { return `${c.kind}:${c.value}`; }
@@ -155,12 +228,18 @@ export const useV1Store = create<V1State>((set, get) => ({
     offline: readLS<boolean>(LS.offline, false, (s) => s === "true"),
     nativeParser: readLS<boolean>(LS.nativeParser, false, (s) => s === "true"),
     timezone: readLS<string>(LS.tz, defaultMode().timezone, (s) => s || defaultMode().timezone),
+    monthlyCapUSD:      readLS<number | null>(LS.monthlyCapUSD,      null, parseFiniteNumber),
+    perBlockTokenLimit: readLS<number | null>(LS.perBlockTokenLimit, null, parseFiniteNumber),
   },
   settingsOpen: false,
 
   projectsDialogOpen: false,
   blockDetailId: null,
   limitResetDismissed: false,
+
+  x1BannerDismissedFor: null,
+  donutScope: readLS<DonutScope>(LS.donutScope, "window", (s) => (VALID_DONUT_SCOPE.has(s as DonutScope) ? s as DonutScope : "window")),
+  perAgent: defaultPerAgent(),
 
   setView(v) { writeLS(LS.view, v); set({ view: v }); },
   addFilter(c) {
@@ -203,6 +282,12 @@ export const useV1Store = create<V1State>((set, get) => ({
     if (patch.offline !== undefined) writeLS(LS.offline, String(next.offline));
     if (patch.nativeParser !== undefined) writeLS(LS.nativeParser, String(next.nativeParser));
     if (patch.timezone !== undefined) writeLS(LS.tz, next.timezone);
+    if (patch.monthlyCapUSD !== undefined) {
+      writeLS(LS.monthlyCapUSD, next.monthlyCapUSD == null ? "" : String(next.monthlyCapUSD));
+    }
+    if (patch.perBlockTokenLimit !== undefined) {
+      writeLS(LS.perBlockTokenLimit, next.perBlockTokenLimit == null ? "" : String(next.perBlockTokenLimit));
+    }
     set({ mode: next });
   },
   resetMode() {
@@ -211,6 +296,8 @@ export const useV1Store = create<V1State>((set, get) => ({
     writeLS(LS.offline, String(m.offline));
     writeLS(LS.nativeParser, String(m.nativeParser));
     writeLS(LS.tz, m.timezone);
+    writeLS(LS.monthlyCapUSD, "");
+    writeLS(LS.perBlockTokenLimit, "");
     set({ mode: m });
   },
   setSettingsOpen(b) { set({ settingsOpen: b }); },
@@ -220,6 +307,17 @@ export const useV1Store = create<V1State>((set, get) => ({
 
   dismissLimitReset() { set({ limitResetDismissed: true }); },
   resetLimitResetDismiss() { set({ limitResetDismissed: false }); },
+
+  dismissX1BannerToday(today) { set({ x1BannerDismissedFor: today }); },
+
+  setDonutScope(s) { writeLS(LS.donutScope, s); set({ donutScope: s }); },
+
+  setPerAgent(state) { set({ perAgent: state }); },
+  setPerAgentLoading() {
+    const prev = get().perAgent;
+    set({ perAgent: { ...prev, status: "loading" } });
+  },
+  resetPerAgent() { set({ perAgent: defaultPerAgent() }); },
 }));
 
 /** Test/reset helper. */
@@ -240,13 +338,20 @@ export function __resetV1StoreForTests(): void {
     projectsDialogOpen: false,
     blockDetailId: null,
     limitResetDismissed: false,
+    x1BannerDismissedFor: null,
+    donutScope: "window",
+    perAgent: defaultPerAgent(),
   });
 }
 
 /** Default-detection helper used by the Settings popover dot indicator. */
 export function isModeDefault(m: ModeState): boolean {
   const d = defaultMode();
-  return m.costMode === d.costMode && !m.offline && !m.nativeParser && m.timezone === d.timezone;
+  return m.costMode === d.costMode
+    && !m.offline && !m.nativeParser
+    && m.timezone === d.timezone
+    && m.monthlyCapUSD === d.monthlyCapUSD
+    && m.perBlockTokenLimit === d.perBlockTokenLimit;
 }
 
 export function formatRangeLabel(r: Range): string {

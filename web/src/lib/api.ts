@@ -28,3 +28,32 @@ export async function fetchHourly(date: string, tz: string): Promise<HourlyRespo
   if (!res.ok) throw new Error(`hourly HTTP ${res.status}`);
   return res.json();
 }
+
+/**
+ * R3.6 — fan-out per-agent rollup. Returns the `PerAgentSummary<…>` envelope
+ * verbatim from the server so the UI store can transition through the
+ * §3.2 state machine ("ok" | "partial" | "timeout") with no shaping in
+ * between.
+ */
+export interface PerAgentAgentData {
+  totalCostUSD: number;
+  totalTokens: number;
+  sessionCount: number;
+}
+export interface PerAgentResponse {
+  date: string;
+  tz: string;
+  status: "ok" | "partial" | "timeout";
+  succeeded: Array<{ agent: string; data: PerAgentAgentData }>;
+  failed:    Array<{ agent: string; err: Error }>;
+  timedOut:  Array<{ agent: string }>;
+  elapsedMs: number;
+  budgetMs: number;
+}
+
+export async function fetchPerAgent(date: string, tz: string): Promise<PerAgentResponse> {
+  const url = `/api/per-agent?date=${encodeURIComponent(date)}&tz=${encodeURIComponent(tz)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`per-agent HTTP ${res.status}`);
+  return res.json();
+}

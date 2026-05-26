@@ -8,6 +8,8 @@ import { MetricCardV1 } from "./components/MetricCardV1";
 import { DriverStrip } from "./components/DriverStrip";
 import { ViewToggle } from "./components/ViewToggle";
 import { FilterChipRow } from "./components/FilterChipRow";
+import { AgentChipRow } from "./components/AgentChipRow";
+import { BudgetBanner } from "./components/BudgetBanner";
 import { TrendChartV1 } from "./components/TrendChartV1";
 import { ModelDonutV1 } from "./components/ModelDonutV1";
 import { BlockHistoryStrip } from "./components/BlockHistoryStrip";
@@ -98,6 +100,20 @@ export function DashboardV1({ skipLiveWiring = false, routeOverride }: Dashboard
   const projects = snap?.derived.projects ?? [];
   const cache = snap?.derived.cache;
   const limitReset = snap?.derived.limitReset;
+  // R3.5 + R3.7 — promoted insights for the chip row + banner.
+  const detectedAgents = snap?.derived.detectedAgents;
+  const budget = snap?.derived.budget;
+  const parserMode = snap?.derived.mode;
+  // R3.7 single-source-of-truth: banner fires when the user has a cap
+  // and the server's projection > cap. Re-derived in BudgetBanner; the
+  // dashboard re-computes here only so it can pass the resulting
+  // `x1BannerActive` flag down to the BlockHistoryStrip for the
+  // single-banner invariant (no double-firing rose/amber surfaces).
+  const monthlyCap = useV1Store((s) => s.mode.monthlyCapUSD);
+  const x1Dismissed = useV1Store((s) => s.x1BannerDismissedFor) === todayKey;
+  const x1BannerActive =
+    !x1Dismissed && monthlyCap != null && monthlyCap > 0
+    && (budget?.monthEndProjectionUSD ?? 0) > monthlyCap;
 
   const agentBreakdown = useMemo(
     () => selectAgentBreakdown(snap?.daily.records ?? []),
@@ -159,7 +175,7 @@ export function DashboardV1({ skipLiveWiring = false, routeOverride }: Dashboard
         </div>
         <div className="flex items-center gap-3 text-xs">
           <LiveIndicator />
-          <ModeBadgesV1 />
+          <ModeBadgesV1 parserMode={parserMode} />
           <Suspense fallback={<HeaderButtonSkeleton width="w-20" label="Range" />}>
             <DateRangePickerV1 />
           </Suspense>
@@ -176,6 +192,26 @@ export function DashboardV1({ skipLiveWiring = false, routeOverride }: Dashboard
           </Suspense>
         </div>
       </header>
+
+      {/* R3.7 — page-bleed X1 budget banner, top of the body region.
+          Single-banner invariant: when this fires, BlockHistoryStrip
+          suppresses its D9 LimitResetBanner (folded into addendum here). */}
+      <BudgetBanner
+        monthEndProjectionUSD={budget?.monthEndProjectionUSD ?? null}
+        todayKey={todayKey}
+        limitResetActive={limitReset?.active}
+        limitResetTimeLabel={
+          limitReset?.resetAt
+            ? new Date(limitReset.resetAt).toUTCString().slice(17, 22)
+            : null
+        }
+      />
+
+      {/* R3.5 — always-visible agent chip row (above the active-filter row
+          so the user can engage the filter from a single click without
+          first locating the chart legend). Hides itself when no agents
+          have been detected. */}
+      <AgentChipRow detectedAgents={detectedAgents} />
 
       <FilterChipRow />
 
@@ -255,9 +291,10 @@ export function DashboardV1({ skipLiveWiring = false, routeOverride }: Dashboard
       >
         <ModelDonutV1
           records={inRangeDaily}
+          allRecords={allDaily}
           onPickModel={(m) => addFilter({ kind: "model", value: m })}
         />
-        <BlockHistoryStrip blocks={blocks} limitReset={limitReset} />
+        <BlockHistoryStrip blocks={blocks} limitReset={limitReset} x1BannerActive={x1BannerActive} />
         <ProjectsPanelV1 projects={projects} />
         <CacheSavingsPanelV1 cache={cache} />
       </section>

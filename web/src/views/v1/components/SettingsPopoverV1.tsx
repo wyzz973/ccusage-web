@@ -156,6 +156,57 @@ export function SettingsPopoverV1(): JSX.Element {
             {DEDUP_TIMEZONES.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
           </select>
         </fieldset>
+
+        {/* R3.7 — Budget group (spec-v3 §3.3.1 + §3.3.3).
+            Both inputs are client-side policy: server emits the projection
+            (`derived.budget.monthEndProjectionUSD`) regardless of cap, and
+            the X1 banner / per-block chip mount on the client when the
+            projection / per-block-projection cross the user's threshold.
+            Empty string clears the cap (null = no fire).
+        */}
+        <fieldset className="space-y-1.5">
+          <legend className="text-[10px] uppercase tracking-wider text-muted-foreground">Budget</legend>
+          <div className="rounded-md border border-border px-2 py-1.5 space-y-1">
+            <label htmlFor="budget-cap" className="text-xs text-zinc-100">Monthly cap (USD)</label>
+            <input
+              id="budget-cap"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step={1}
+              value={mode.monthlyCapUSD ?? ""}
+              onChange={(e) => {
+                const v = e.target.value === "" ? null : Number(e.target.value);
+                setMode({ monthlyCapUSD: v != null && Number.isFinite(v) && v > 0 ? v : null });
+              }}
+              placeholder="—"
+              className="w-full rounded border border-border bg-transparent px-1.5 py-1 text-xs text-zinc-100 [color-scheme:dark]"
+              aria-label="Monthly USD cap"
+              data-testid="budget-cap-input"
+            />
+            <div className="text-[10px] text-muted-foreground">Banner fires when projection &gt; cap</div>
+          </div>
+          <div className="rounded-md border border-border px-2 py-1.5 space-y-1">
+            <label htmlFor="block-token-limit" className="text-xs text-zinc-100">Per-block token limit</label>
+            <input
+              id="block-token-limit"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              step={1_000_000}
+              value={mode.perBlockTokenLimit ?? ""}
+              onChange={(e) => {
+                const v = e.target.value === "" ? null : Number(e.target.value);
+                setMode({ perBlockTokenLimit: v != null && Number.isFinite(v) && v > 0 ? v : null });
+              }}
+              placeholder="—"
+              className="w-full rounded border border-border bg-transparent px-1.5 py-1 text-xs text-zinc-100 [color-scheme:dark]"
+              aria-label="Per-block token limit"
+              data-testid="block-token-limit-input"
+            />
+            <div className="text-[10px] text-muted-foreground">Chip fires when active-block projection exceeds limit</div>
+          </div>
+        </fieldset>
       </PopoverContent>
     </Popover>
   );

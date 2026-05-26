@@ -1,16 +1,17 @@
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { AGENT_COLORS, AGENT_LABEL, toAgentKey, type AgentKey } from "../lib/agent-colors";
 import { useV1Store } from "../data/v1-store";
 import type { FilterChip } from "../data/selectors";
 
 // B1 · Filter chip row — hidden when empty (spec §1.1).
+//
+// R3.5 — agent chips removed from this row. AgentChipRow above handles
+// agent-filter affordance (always-visible chip row of detectedAgents).
+// Showing the same agent chip in both rows was creating a duplicate
+// dismiss-X surface that the user could accidentally click in either
+// place; collapsing to one source of truth.
 
-function chipDescriptor(c: FilterChip): { label: string; tint?: string } {
-  if (c.kind === "agent") {
-    const k = toAgentKey(c.value) as AgentKey;
-    return { label: AGENT_LABEL[k], tint: AGENT_COLORS[k] };
-  }
+function chipDescriptor(c: Exclude<FilterChip, { kind: "agent" }>): { label: string; tint?: string } {
   if (c.kind === "project") {
     // S3 (R2): prefer the human-facing displayName; fall back to canonical.
     const label = c.displayName ? `project: ${c.displayName}` : `project: ${c.value}`;
@@ -27,7 +28,11 @@ export function FilterChipRow(): JSX.Element | null {
   const removeFilter = useV1Store((s) => s.removeFilter);
   const clearFilters = useV1Store((s) => s.clearFilters);
 
-  if (filters.length === 0) return null;
+  // R3.5 — agent chips are owned by AgentChipRow now (always-visible row).
+  // Filter only the rest into this "active filters" surface so the user
+  // doesn't see the same agent chip in two places.
+  const nonAgentFilters = filters.filter((c): c is Exclude<FilterChip, { kind: "agent" }> => c.kind !== "agent");
+  if (nonAgentFilters.length === 0) return null;
 
   return (
     <section
@@ -37,7 +42,7 @@ export function FilterChipRow(): JSX.Element | null {
     >
       <span className="text-xs uppercase tracking-wider text-muted-foreground">Filtered by</span>
       <ul className="flex flex-wrap items-center gap-1.5" role="list">
-        {filters.map((c) => {
+        {nonAgentFilters.map((c) => {
           const { label, tint } = chipDescriptor(c);
           return (
             <li key={`${c.kind}:${c.value}`}>
