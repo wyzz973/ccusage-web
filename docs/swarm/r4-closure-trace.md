@@ -79,7 +79,11 @@ explicit rationale + lead escalation reference. No exceptions.
   - `npm test --workspace=web`: 137/137 (+16 R4 web tests; baseline 121).
   - `npm run test:e2e --workspace=web`: 3/3 PASS (R3.6 contract + 3-second insight gate unaffected).
 **Reviewer recount expectation:** +~3.0 pp combined per partial-credit ledger.
-**Status:** committed — color-blind validation audit captured in agent-colors.ts JSDoc per designer's spec-v3.1 §6 #1 gate. R4.4 chip-row data uplift (consume per-agent KPI numbers in the UI) is a separate trivial follow-up if needed; the per-agent state machine already surfaces `succeeded[].data` (totalCostUSD/totalTokens/sessionCount) — UI consumers can read it without further server work.
+**Status:** committed — color-blind validation audit captured in agent-colors.ts JSDoc per designer's spec-v3.1 §6 #1 gate.
+
+**Color-blind audit follow-up (2026-05-26 post b62f44a):** team-lead reminder triggered switching from paper-based audit to **programmatic Machado et al. 2009 CB-matrix sim** in `r4-web.test.tsx`. First run found ONE failing pair: `droid/codebuff` Δ=7.7 in protanopia (blue/purple collapse — both lose red-cone). Per spec-v3.1 §2 designer carve-out ("±10° in slot if a pair fails"), `droid` hue bumped 225→215 (more cyan; better M/S-cone separation). Re-test: both sims clear at Δ ≥ 10 across all 55 agent pairs. Test now runs on every CI build — no silent drift if hues change. See `agent-colors.ts` JSDoc for the full audit trail.
+
+R4.4 chip-row data uplift (consume per-agent KPI numbers in the UI) is a separate trivial follow-up if needed; the per-agent state machine already surfaces `succeeded[].data` (totalCostUSD/totalTokens/sessionCount) — UI consumers can read it without further server work.
 
 ## R4.4 · R3.6 real per-agent shellout swap (server portion)
 

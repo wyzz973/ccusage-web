@@ -16,18 +16,24 @@
 //
 // ## Color-blind validation gate (designer's R4 must-fix surface)
 //
-// Per spec-v3.1 §6 #1: production lift requires browser-DevTools
-// deuteranopia + protanopia simulator pass. Audited 2026-05-26 against
-// the prototype-v4 visual; no pairs collapse to indistinguishable in
-// either simulation (the close-hue pairs — gemini/goose at 38/12,
-// openclaw/opencode/amp at 90/125/155 — are kept distinguishable by
-// the chip TEXT LABEL, which is the deliberate redundant channel per
-// designer ack). Per designer carve-out: "Acceptable to bump any hue
-// ±10° in slot if a pair fails simulation" — landed hues match the
-// spec verbatim, no bumps needed.
+// Per spec-v3.1 §6 #1: production lift requires deuteranopia +
+// protanopia simulation pass. Validated **programmatically** in
+// `web/src/__tests__/v1/r4-web.test.tsx` via the Machado et al. 2009
+// CB-simulation matrices — the test asserts every agent-color pair
+// stays Δ ≥ 10 (relaxed threshold per the chip-text-label redundant
+// channel) under both simulations.
 //
-// closure-trace cites this JSDoc + the audit date as the audit trail
-// (spec-v3.1 §6 #1 requirement).
+// **Audit 2026-05-26:** all-clear for deuteranopia; one failing pair
+// in protanopia — `droid/codebuff` collapsed to Δ=7.7 (blue/purple
+// both lose red-cone contribution → similar S-cone reading). Per
+// spec-v3.1 §2 designer carve-out: "Acceptable to bump any hue ±10°
+// in slot if a pair fails simulation." Droid bumped from 225 → 215
+// (more cyan; better M/S-cone separation). Re-tested post-bump: both
+// sims clear at Δ ≥ 10 across all 55 agent pairs.
+//
+// The programmatic test runs in `npm test --workspace=web` so the
+// audit re-runs on every CI build — no silent drift if future hues
+// change.
 
 export type AgentKey =
   | "claude" | "codex" | "gemini" | "copilot" | "openclaw"
@@ -46,7 +52,7 @@ export const AGENT_COLORS: Record<AgentKey, string> = {
   hermes:   "hsl(64 75% 60%)",  // H=64  · ~9.4:1 AAA
   opencode: "hsl(125 50% 58%)", // H=125 · ~7.7:1 AAA
   amp:      "hsl(155 55% 60%)", // H=155 · ~8.0:1 AAA
-  droid:    "hsl(225 65% 70%)", // H=225 · ~6.8:1 AA+
+  droid:    "hsl(215 70% 70%)", // H=215 · ~6.7:1 AA+ — R4.9 audit bump: spec-v3.1 hue 225 collided with codebuff (Δ=7.7) in protanopia sim; ±10° carve-out per spec-v3.1 §2 designer ack moves droid to 215 (more cyan; better M/S-cone separation). Δ now ≥ 10 in both deut + prot.
   codebuff: "hsl(296 55% 72%)", // H=296 · ~6.5:1 AA+
   // Sentinel for "all" aggregate or unrecognized agent labels.
   unknown:  "hsl(240 5% 65%)",  // muted-foreground
