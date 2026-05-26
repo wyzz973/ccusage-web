@@ -339,9 +339,10 @@ export function createPoller(deps: PollerDeps): Poller {
   const tz = deps.tz ?? "UTC";
   const parserMode = deps.parserMode ?? "fallback";
   const startOfWeek = deps.startOfWeek ?? "monday";
-  // R4.1 + R4.2 — non-Claude per-source agents. Empty array disables;
-  // default `["hermes", "goose"]` matches PRD §1 scope.
-  const extraAgents = deps.extraAgents ?? ["hermes", "goose"];
+  // R4.1 + R4.2 + R4.3 — non-Claude per-source agents. Empty array
+  // disables; default `["hermes", "goose", "codex"]` covers all 3
+  // PRD §1 agent-uplift items (A2.2 Codex + A2.10 Hermes + A2.12 Goose).
+  const extraAgents = deps.extraAgents ?? ["hermes", "goose", "codex"];
   const extraAgentsFetcher = deps.extraAgentsFetcher;
   let timer: NodeJS.Timeout | null = null;
   let running = false;

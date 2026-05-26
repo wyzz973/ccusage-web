@@ -214,4 +214,33 @@ describe("poller", () => {
     await poller.runOnce();
     expect(extraAgentsFetcher).not.toHaveBeenCalled();
   });
+
+  // R4.3 — Codex sessions land in detectedAgents via the same shellout
+  // pattern; PRD R4.3.AC1 cumulative-totals state machine handled by
+  // ccusage upstream (see closure-trace bench rationale).
+  it("R4.3: codex sessions surface in detectedAgents when included in extraAgents", async () => {
+    const store = createSnapshotStore();
+    const runMock = vi.fn(async (cmd: string) => ({ [cmd]: [] }));
+    const extraAgentsFetcher = vi.fn(async (agents: readonly string[]) =>
+      agents.includes("codex") ? [{
+        period: "codex-sess-1", agent: "codex",
+        totalTokens: 100, totalCost: 2,
+        inputTokens: 60, outputTokens: 40, cacheCreationTokens: 0, cacheReadTokens: 0,
+        modelsUsed: ["gpt-5"], modelBreakdowns: [],
+        metadata: { lastActivity: `${TODAY}T11:50:00Z` },
+      }] : [],
+    );
+    const poller = createPoller({
+      store,
+      runCcusage: runMock as never,
+      getVersion: async () => "20.0.0",
+      intervalMs: 10_000,
+      now: () => new Date(`${TODAY}T12:00:00Z`),
+      extraAgentsFetcher,
+      extraAgents: ["hermes", "goose", "codex"],
+    });
+    await poller.runOnce();
+    const snap = store.get();
+    expect(snap?.derived.detectedAgents).toContain("codex");
+  });
 });

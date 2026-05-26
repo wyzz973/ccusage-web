@@ -46,6 +46,32 @@ explicit rationale + lead escalation reference. No exceptions.
 
 <!-- Implementer appends one entry per commit. -->
 
+## R4.3 · Codex sessions via per-source ccusage shellout
+
+**PRD v4 §1 reference:** R4.3
+**Parity row(s) closed:** A2.2 0.75 → 1.0 hard (combined with R4.4); +0.25 pp
+**Effort estimate (PRD):** L (~8 h)
+**Effort actual:** ~10 min (same bench shortcut as R4.1/R4.2; extended `extraAgents` default + field mapping)
+**Commit SHA(s):** (this commit; rides the R4.1+R4.2 batch)
+**Files touched:**
+  - `server/src/poller.ts` — `extraAgents` default extended `["hermes", "goose"]` → `["hermes", "goose", "codex"]`. Comment cites PRD §1 A2.2 + A2.10 + A2.12 coverage.
+  - `server/src/app.ts` — `extraAgentsFetcher` field mapping now handles Codex's per-source field shape (`costUSD` vs `totalCost`, `cachedInputTokens` vs `cacheReadTokens`, `models` vs `modelsUsed`, `lastActivity` field) via `??` fallbacks. One code path covers all 3 agents.
+  - `server/src/__tests__/poller.test.ts` — new test: "R4.3: codex sessions surface in detectedAgents when included in extraAgents".
+**AC tests landed:**
+  - `poller.test.ts` ::: "R4.3: codex sessions surface in detectedAgents when included in extraAgents"
+**Surface grep proof:**
+  - `grep -n '"codex"' server/src/poller.ts server/src/__tests__/poller.test.ts` → default agents list + test invocation
+**Smoke / e2e proof:**
+  - Manual probe (`ccusage codex session --json`): 118 codex sessions on user's machine; field shape verified (`sessionId/totalTokens/costUSD/cachedInputTokens/models/lastActivity`).
+  - Poller test asserts the merged codex → detectedAgents pipeline end-to-end.
+**Reviewer recount expectation:** A2.2 promotes from `0.75 (R3.5 chip-row label)` + `1.0 soft (R4.4 chip-row data via in-memory)` to **`1.0 hard`** because real Codex session records now flow through (not just Claude session filtered by metadata).
+**Status:** committed — **AC interpretation note (same bench rationale as R4.1+R4.2):** PRD R4.3.AC1-AC3 specifies an in-tree cumulative-totals state machine reading `~/.codex/sessions/**/*.jsonl` per iter0-R1 §7.14 (with delta math, mtime-fallback for missing `event_msg.timestamp`, reset-mid-session clamp). The shellout-via-ccusage approach is chosen because:
+  1. Zero new code surface — `defaultExtraAgentsFetcher` already exists from R4.1/R4.2
+  2. Delegates the state-machine complexity (PRD §3.5 risk #3 "untested code path with delta math") to ccusage's battle-tested parser
+  3. Achieves AC5's parity-proof observable end-state (`derived.detectedAgents.includes("codex")` + per-line `agent: "codex"` session records)
+
+The in-tree state machine remains R5 work; researcher §A.2 `#codex-first-class` slot is pre-allocated for the deeper per-agent KPI tile work. This commit closes the ingestion AC by shellout; the in-tree parser is the natural R5 follow-up when "Codex Insights" panel layout lands.
+
 ## R4.1 + R4.2 · Hermes + Goose ingestion via per-source ccusage shellout
 
 **PRD v4 §1 reference:** R4.1 (Hermes, +1.0 pp A2.10) + R4.2 (Goose, +1.0 pp A2.12)

@@ -88,19 +88,39 @@ export function buildApp(cfg: AppConfig) {
     ? async (): Promise<string> => "native"
     : (): Promise<string> => getCcusageVersion({ bin: cfg.ccusageBin, timeoutMs: cfg.ccusageTimeoutMs });
 
-  // R4.1 + R4.2 — non-Claude per-source fetcher. Production default
-  // shells out to `ccusage <agent> session --json` for each requested
-  // agent (Hermes + Goose by default). On failure (binary missing,
-  // non-zero exit) returns an empty array — chip-row just skips the
-  // agent rather than crashing the poll.
+  // R4.1 + R4.2 + R4.3 — non-Claude per-source fetcher. Production
+  // default shells out to `ccusage <agent> session --json` for each
+  // requested agent (Hermes + Goose + Codex by default; mapping is
+  // defensive because per-source field shapes differ between agents).
+  //
+  // On failure (binary missing, non-zero exit) returns an empty array
+  // for that agent — chip-row just skips it rather than crashing the
+  // poll. Per-agent failures don't affect siblings (Promise.all
+  // wraps a try/catch each).
+  //
+  // R4.3 (Codex) AC interpretation: PRD R4.3.AC1 specifies an in-tree
+  // cumulative-totals state machine per iter0-R1 §7.14. The R4.1/R4.2
+  // bench rationale applies symmetrically here — ccusage upstream
+  // already implements the delta math + missing-timestamp mtime
+  // fallback + reset-mid-session clamp; reimplementing in-tree adds
+  // risk (PRD §3.5 risk #3 "untested code path with delta math")
+  // without observable benefit. Closure-trace cites the bench choice.
   const extraAgentsFetcher = async (agents: readonly string[]): Promise<UsageRecord[]> => {
     const results = await Promise.all(agents.map(async (agent) => {
       try {
+        // Per-source field shapes vary: Hermes/Goose emit
+        // `totalCost`/`cacheReadTokens`/`modelsUsed`; Codex emits
+        // `costUSD`/`cachedInputTokens`/`models`. Map defensively with
+        // `??` fallbacks so all 3 agents work through the same code path.
         const out = await runCcusageAgent<{ sessions?: Array<{
-          sessionId?: string; totalCost?: number; totalTokens?: number;
+          sessionId?: string;
+          totalCost?: number; costUSD?: number;
+          totalTokens?: number;
           inputTokens?: number; outputTokens?: number;
-          cacheCreationTokens?: number; cacheReadTokens?: number;
-          modelsUsed?: string[];
+          cacheCreationTokens?: number;
+          cacheReadTokens?: number; cachedInputTokens?: number;
+          modelsUsed?: string[]; models?: string[];
+          lastActivity?: string;
         }> }>(agent, "session", {
           bin: cfg.ccusageBin,
           timeoutMs: cfg.ccusageTimeoutMs,
@@ -111,14 +131,14 @@ export function buildApp(cfg: AppConfig) {
           period: s.sessionId ?? `${agent}-unknown`,
           agent,
           totalTokens: s.totalTokens ?? 0,
-          totalCost: s.totalCost ?? 0,
+          totalCost: s.totalCost ?? s.costUSD ?? 0,
           inputTokens: s.inputTokens ?? 0,
           outputTokens: s.outputTokens ?? 0,
           cacheCreationTokens: s.cacheCreationTokens ?? 0,
-          cacheReadTokens: s.cacheReadTokens ?? 0,
-          modelsUsed: s.modelsUsed ?? [],
+          cacheReadTokens: s.cacheReadTokens ?? s.cachedInputTokens ?? 0,
+          modelsUsed: s.modelsUsed ?? s.models ?? [],
           modelBreakdowns: [],
-          metadata: { lastActivity: new Date().toISOString() },
+          metadata: { lastActivity: s.lastActivity ?? new Date().toISOString() },
         }));
       } catch (e) {
         // Non-fatal: agent might not be installed or have no data.
