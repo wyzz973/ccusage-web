@@ -77,7 +77,22 @@ export interface CookedEntry {
   cacheReadInputTokens: number;
   totalTokens: number;
   speed?: string;
+  /**
+   * The cost the consumer should use, post-mode-resolution by the
+   * loader. Parser always sets the recomputed "calculate" value here;
+   * the loader's `applyCostMode` (R3 S-R2-2 fix) may overwrite to the
+   * `rawCostUSD` value when `mode` is `auto` or `display`. See
+   * Researcher v3 §D.2 for the structural drift this closes.
+   */
   costUSD: number;
+  /**
+   * R3 (S-R2-2 fix): raw `costUSD` from the JSONL line. `undefined` =
+   * the field was absent; `null` = the line carried `"costUSD": null`
+   * explicitly (allowed per `NULL_FORBIDDEN_FIELDS` — iter0-R1 §7.3).
+   * The loader's mode resolver picks among this and the recomputed
+   * value depending on `LoadOptions.mode`.
+   */
+  rawCostUSD?: number | null;
   /**
    * R2.2 (M-R2-1): source file path, used by the runner to stamp
    * `UsageRecord.project` via `decodeProject(filePath)`. Only set when
@@ -179,6 +194,7 @@ export function parseLine(line: string, pricing: PricingFinder, opts: ParseLineO
     totalTokens: input + output + cc + cr,
     speed: u.speed,
     costUSD,
+    rawCostUSD: raw.costUSD,
     filePath: opts.filePath,
   };
 }

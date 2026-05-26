@@ -43,6 +43,13 @@ export interface NativeRunnerOptions {
   pricing?: PricingFinder;
   /** Filesystem facade (tests). */
   fs?: { readFileSync(p: string, enc: BufferEncoding): string };
+  /**
+   * R3 (S-R2-2): cost-mode resolution. Defaults to `"calculate"` —
+   * matches the M6 golden gate and Researcher v3 §D's recommendation
+   * for the native default. Apples-to-apples vs ccusage requires
+   * passing `--mode calculate` to the binary too.
+   */
+  mode?: import("./loader.js").Mode;
 }
 
 const BLOCK_HOURS = 5;
@@ -58,8 +65,9 @@ export async function runNative<T = unknown>(
   const files = opts.files ?? discoverJsonlFiles();
   const pricing = opts.pricing ?? createPricing();
   const fsImpl = opts.fs ?? fs;
+  const mode = opts.mode ?? "calculate";
 
-  const perFile = files.map((file) => loadFile(file, fsImpl, pricing));
+  const perFile = files.map((file) => loadFile(file, fsImpl, pricing, mode));
 
   switch (cmd) {
     case "daily":
@@ -87,13 +95,15 @@ function loadFile(
   file: string,
   fsImpl: { readFileSync(p: string, enc: BufferEncoding): string },
   pricing: PricingFinder,
+  mode: import("./loader.js").Mode = "calculate",
 ): FileBundle {
   let text = "";
   try { text = fsImpl.readFileSync(file, "utf8"); } catch { /* unreadable */ }
   // R2.2 (M-R2-1): pass `filePath` through so each cooked entry knows
   // which file it came from, enabling per-session project stamping in
   // `bucketBySession` below.
-  const result = loadJsonlContent(text, { pricing, filePath: file });
+  // R3 (S-R2-2): pass `mode` so cost resolution happens inside the loader.
+  const result = loadJsonlContent(text, { pricing, mode, filePath: file });
   return { file, agent: inferAgentFromPath(file), result };
 }
 
