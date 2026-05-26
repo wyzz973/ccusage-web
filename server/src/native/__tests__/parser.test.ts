@@ -75,9 +75,9 @@ describe("parseLine validation", () => {
   });
 
   it("applies fast_multiplier to fast-tier entries", () => {
-    // opus-4-7 fast_multiplier = 6.0; input 1000 * 15e-6 + output 500 * 75e-6 = 0.0525; * 6 = 0.315
+    // R4.10 — post-Nov opus-4-7 rates: input 1000 * 5e-6 + output 500 * 25e-6 = 0.0175; * 6 = 0.105
     const e = parseLine(basicLine({ message: { id: "m", model: "claude-opus-4-7", usage: { input_tokens: 1000, output_tokens: 500, speed: "fast" } } }), pricing);
-    expect(e!.costUSD).toBeCloseTo(0.315, 4);
+    expect(e!.costUSD).toBeCloseTo(0.105, 4);
   });
 });
 

@@ -48,11 +48,19 @@ export const PRICING_TABLE: Record<string, PriceRow> = {
     cache_read_above_200k: null,
     fast_multiplier: 1.0,
   },
+  // R4.10 — `-20251101` SHA introduces Anthropic's post-Nov 2026
+  // price reduction for the Opus 4.5 tier. New rates are exactly 1/3
+  // of the pre-Nov ladder. Empirically verified against ccusage's
+  // LiteLLM snapshot: 2026-01 `actual=$30.4580 predicted-with-(5,25,6.25,0.5)=$30.4580`
+  // (and 2026-02 same exact match). The non-dated `claude-opus-4-5`
+  // entry above still carries pre-Nov rates for entries that don't
+  // pin the SHA — this preserves apples-to-apples with ccusage's own
+  // by-SHA pricing lookup.
   "claude-opus-4-5-20251101": {
-    input: 15 * M,
-    output: 75 * M,
-    cache_create: 18.75 * M,
-    cache_read: 1.5 * M,
+    input: 5 * M,
+    output: 25 * M,
+    cache_create: 6.25 * M,
+    cache_read: 0.5 * M,
     cache_read_explicit: true,
     input_above_200k: null,
     output_above_200k: null,
@@ -60,11 +68,18 @@ export const PRICING_TABLE: Record<string, PriceRow> = {
     cache_read_above_200k: null,
     fast_multiplier: 1.0,
   },
+  // R4.10 — Opus 4.6 / 4.7 inherit the post-Nov 1/3 reduction (same as
+  // 4-5-20251101 SHA). Empirically verified against ccusage's LiteLLM
+  // snapshot: aggregate `claude-opus-4-7` cost native=$10818.75 vs cc=$3606.57
+  // (ratio 0.3333) → flat 1/3 across input/output/cache_create/cache_read
+  // → identical to the 4-5-20251101 SHA reduction. fast_multiplier 6.0
+  // preserved (priority-tier amplifier unchanged by the price cut per
+  // upstream `pricing.rs:697-714`).
   "claude-opus-4-6": {
-    input: 15 * M,
-    output: 75 * M,
-    cache_create: 18.75 * M,
-    cache_read: 1.5 * M,
+    input: 5 * M,
+    output: 25 * M,
+    cache_create: 6.25 * M,
+    cache_read: 0.5 * M,
     cache_read_explicit: true,
     input_above_200k: null,
     output_above_200k: null,
@@ -73,10 +88,10 @@ export const PRICING_TABLE: Record<string, PriceRow> = {
     fast_multiplier: 6.0,
   },
   "claude-opus-4-7": {
-    input: 15 * M,
-    output: 75 * M,
-    cache_create: 18.75 * M,
-    cache_read: 1.5 * M,
+    input: 5 * M,
+    output: 25 * M,
+    cache_create: 6.25 * M,
+    cache_read: 0.5 * M,
     cache_read_explicit: true,
     input_above_200k: null,
     output_above_200k: null,

@@ -1,7 +1,7 @@
 {
-  "comment": "Hand-computed oracle for synthetic.jsonl. Per Researcher v2 §C.2 tolerance contract: cost equality to 4 decimal places (round4); tokens exact equality. Edge cases covered: 1 synthetic-model, 2 costUSD-null-accepted, 3 id-null-rejected, 4 version-dev-rejected, 5 sessionId-empty-rejected, 6 dedup-higher-tokens-wins, 7 fast-multiplier-on-opus-4-7, 8 sonnet-4-input-tier-break-200k, 9 cache-create-and-cache-read-simultaneous, 10 unknown-model-cost-zero, 11/12/13 (R4.0.b) tolerable-null fields kept (isApiErrorMessage/cache_creation_input_tokens/cache_read_input_tokens). Computed by hand from the pricing-data.ts snapshot.",
+  "comment": "Hand-computed oracle for synthetic.jsonl. Per Researcher v2 §C.2 tolerance contract: cost equality to 4 decimal places (round4); tokens exact equality. Edge cases covered: 1 synthetic-model, 2 costUSD-null-accepted, 3 id-null-rejected, 4 version-dev-rejected, 5 sessionId-empty-rejected, 6 dedup-higher-tokens-wins, 7 fast-multiplier-on-opus-4-7, 8 sonnet-4-input-tier-break-200k, 9 cache-create-and-cache-read-simultaneous, 10 unknown-model-cost-zero, 11/12/13 (R4.0.b) tolerable-null fields kept (isApiErrorMessage/cache_creation_input_tokens/cache_read_input_tokens). R4.10 — opus-4-7-fast cost reduced from $0.315 to $0.105 reflecting Anthropic's post-Nov 2026 Opus 4.x price cut (rates now 5/25/6.25/0.5 per M, 1/3 of pre-Nov). Computed by hand from the pricing-data.ts snapshot.",
   "totals": {
-    "totalCost": 1.36795,
+    "totalCost": 1.15795,
     "totalTokens": 288900,
     "inputTokens": 268600,
     "outputTokens": 10300,
@@ -9,7 +9,7 @@
     "cacheReadTokens": 7000,
     "modelBreakdowns": [
       { "modelName": "claude-sonnet-4",            "cost": 1.03335 },
-      { "modelName": "claude-opus-4-7-fast",       "cost": 0.315   },
+      { "modelName": "claude-opus-4-7-fast",       "cost": 0.105   },
       { "modelName": "claude-haiku-4-5",           "cost": 0.0175  },
       { "modelName": "claude-haiku-4-5-fast",      "cost": 0.0021  },
       { "modelName": "unknown-future-model-xyz",   "cost": 0.0     }

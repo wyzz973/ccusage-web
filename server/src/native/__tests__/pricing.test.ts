@@ -7,9 +7,10 @@ beforeEach(() => _resetPricingWarnings());
 describe("createPricing.find — built-in table", () => {
   const p = createPricing();
   it("returns the exact row when the key matches", () => {
-    // Stored as `15 * M` where M = 1/1_000_000; that multiplication carries
-    // ~1ulp of FP error vs the literal `15e-6`, so use toBeCloseTo.
-    expect(p.find("claude-opus-4-7")?.input).toBeCloseTo(15e-6, 9);
+    // Stored as `5 * M` where M = 1/1_000_000; that multiplication carries
+    // ~1ulp of FP error vs the literal `5e-6`, so use toBeCloseTo.
+    // R4.10 — opus-4-7 carries post-Nov reduced input rate (was 15e-6 pre-R4.10).
+    expect(p.find("claude-opus-4-7")?.input).toBeCloseTo(5e-6, 9);
     expect(p.find("claude-sonnet-4")?.input_above_200k!).toBeCloseTo(6e-6, 9);
   });
   it("returns null + warns on unknown model", () => {
@@ -23,6 +24,42 @@ describe("createPricing.find — built-in table", () => {
   });
   it("returns null for empty input", () => {
     expect(p.find("")).toBeNull();
+  });
+
+  // R4.10 — pin Anthropic's post-2026-11 Opus 4.5 price reduction.
+  // Pre-R4.10 we had `opus-4-5-20251101` priced identically to
+  // `claude-opus-4-5` (15/75/18.75/1.5 per M); ccusage's LiteLLM
+  // snapshot has it at exactly 1/3 (5/25/6.25/0.5). Pinning the new
+  // rates here so any future pricing-data hand-merge that accidentally
+  // reverts the SHA loses this test red.
+  it("R4.10: claude-opus-4-5-20251101 carries post-Nov reduced rates (1/3 of pre-Nov)", () => {
+    const row = p.find("claude-opus-4-5-20251101");
+    expect(row).toBeTruthy();
+    expect(row!.input).toBeCloseTo(5e-6, 9);
+    expect(row!.output).toBeCloseTo(25e-6, 9);
+    expect(row!.cache_create).toBeCloseTo(6.25e-6, 9);
+    expect(row!.cache_read).toBeCloseTo(0.5e-6, 9);
+    // Sanity: the SHA-less `claude-opus-4-5` still carries pre-Nov rates
+    // for entries that don't pin the SHA — preserves apples-to-apples
+    // with ccusage's own by-SHA lookup.
+    const preNov = p.find("claude-opus-4-5");
+    expect(preNov!.input).toBeCloseTo(15e-6, 9);
+  });
+
+  // R4.10 — Opus 4.6 / 4.7 inherit the same post-Nov 1/3 reduction
+  // (empirically `claude-opus-4-7` aggregate cost was 3.00× ccusage's
+  // pre-fix). fast_multiplier 6.0 preserved on both (priority-tier
+  // amplifier is independent of the per-unit price cut).
+  it("R4.10: opus-4-6 / opus-4-7 inherit post-Nov reduced rates + preserve fast_multiplier=6.0", () => {
+    for (const model of ["claude-opus-4-6", "claude-opus-4-7"]) {
+      const row = p.find(model);
+      expect(row, `expected ${model} in pricing table`).toBeTruthy();
+      expect(row!.input).toBeCloseTo(5e-6, 9);
+      expect(row!.output).toBeCloseTo(25e-6, 9);
+      expect(row!.cache_create).toBeCloseTo(6.25e-6, 9);
+      expect(row!.cache_read).toBeCloseTo(0.5e-6, 9);
+      expect(row!.fast_multiplier).toBe(6.0);
+    }
   });
 });
 

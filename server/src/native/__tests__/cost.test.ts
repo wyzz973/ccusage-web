@@ -38,8 +38,8 @@ describe("calculateCost", () => {
 
   it("applies fast_multiplier when speed='fast' (opus-4-7 = 6×)", () => {
     const c = calculateCost("claude-opus-4-7", { input_tokens: 1000, output_tokens: 500, speed: "fast" }, pricing);
-    // (1000 * 15e-6 + 500 * 75e-6) * 6 = 0.0525 * 6 = 0.315
-    expect(c).toBeCloseTo(0.315, 4);
+    // R4.10 — post-Nov rates: (1000 * 5e-6 + 500 * 25e-6) * 6 = 0.0175 * 6 = 0.105
+    expect(c).toBeCloseTo(0.105, 4);
   });
 
   it("does NOT apply fast_multiplier when haiku-4-5 fast_multiplier is 1.0", () => {

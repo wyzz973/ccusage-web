@@ -122,4 +122,7 @@ LiteLLM cron — `claude-opus-4-5-20251101`'s revised rates land in
 that commit. After R4.10, smoke goes 3 of 6 → 6 of 6 (the 3 cost
 assertions all converge with the updated rates).
 
-**Status:** scheduled for R4.10 commit; not a slip out of round.
+**Status:** **CLOSED by R4.10 commit.** Probe confirmed scope is wider
+than just `-20251101`: `claude-opus-4-6` and `claude-opus-4-7` carry
+the same 1/3 reduction. All three rows updated; smoke 6 of 6 PASS.
+Closure-trace entry at `r4-closure-trace.md#r4-10`.

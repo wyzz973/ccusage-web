@@ -46,6 +46,30 @@ explicit rationale + lead escalation reference. No exceptions.
 
 <!-- Implementer appends one entry per commit. -->
 
+## R4.10 · Pricing snapshot refresh — Opus 4.x post-Nov rate reduction
+
+**PRD v4 §1 reference:** R4.10
+**Parity row(s) closed:** none direct (rows score off coverage, not freshness); closes gate-5 smoke 6/6 condition (was 3/6 post-R4.0.c)
+**Effort estimate (PRD):** XS (~1 h)
+**Effort actual:** ~30 min (probe + 6-line pricing edit + oracle bump + tests)
+**Commit SHA(s):** (this commit)
+**Files touched:**
+  - `server/src/native/pricing-data.ts` — three Anthropic Opus entries (`claude-opus-4-5-20251101`, `claude-opus-4-6`, `claude-opus-4-7`) rate-reduced from `(15, 75, 18.75, 1.5)` per-M to `(5, 25, 6.25, 0.5)` per-M. `fast_multiplier=6.0` preserved on 4.6/4.7 (priority-tier amplifier is independent of the per-unit price cut, per upstream `pricing.rs:697-714`). `claude-opus-4-5` (no SHA) intentionally kept at pre-Nov rates as the historical fallback.
+  - `server/src/__fixtures__/native/oracle.synthetic.json` — `opus-4-7-fast` row updated $0.315 → $0.105 (1/3 reduction); `totals.totalCost` 1.36795 → 1.15795. Comment extended with the R4.10 rationale.
+  - `server/src/native/__tests__/pricing.test.ts` — existing `opus-4-7` row assertion updated to `5e-6`; new test pins the post-Nov rates for opus-4-5-20251101 AND opus-4-6/4-7 (3 model coverage + fast_multiplier preservation check).
+  - `server/src/native/__tests__/parser.test.ts` — `fast_multiplier` cost expectation updated to `$0.105` (was `$0.315`).
+  - `server/src/native/__tests__/cost.test.ts` — same rate change reflection.
+**AC tests landed:**
+  - `server/src/native/__tests__/pricing.test.ts` ::: "R4.10: claude-opus-4-5-20251101 carries post-Nov reduced rates (1/3 of pre-Nov)"
+  - `server/src/native/__tests__/pricing.test.ts` ::: "R4.10: opus-4-6 / opus-4-7 inherit post-Nov reduced rates + preserve fast_multiplier=6.0"
+**Surface grep proof:**
+  - `grep -nE "claude-opus-4-[5-7]\"" server/src/native/pricing-data.ts` → 4 entries (4-5, 4-5-20251101, 4-6, 4-7); R4.10 reduction applied to the latter 3.
+**Smoke / e2e proof:**
+  - Pre R4.10 (post R4.0.c): 3 of 6 pass (block + token + smoke wiring); 3 cost FAILs all exact 1/3 ratio on Opus 4.x.
+  - Post R4.10: **6 of 6 pass.** Empirical verification probe (`/tmp/probe10.mjs`): `claude-opus-4-7` aggregate cost went from `ours=$10818.75 theirs=$3606.57` (ratio 3.0) to within band; same for 4-6 and 4-5-20251101.
+**Reviewer recount expectation:** 0 pp on parity matrix (rows score off coverage); +1 gate (gate-5 now 6/6 pass, was 5/6 fail at R3.1 close).
+**Status:** committed — closes gate-5 smoke condition; opus-4-5-20251101 slip-plan entry now resolved (see `r4-slip-plan.md#opus-4-5-20251101-pricing-drift`).
+
 ## R4.0.c · Smoke oracle re-parameterise to `ccusage claude <cmd>`
 
 **PRD v4 §1 reference:** R4.0 (S-R2-2 closure batch, combined regression validation)
