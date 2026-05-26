@@ -70,16 +70,17 @@ describe("R4.9 agent-colors palette extension (spec-v3.1 §2)", () => {
     // sRGB → linear → CB-sim → linear → sRGB pipeline.
     // Matrices: Machado et al. 2009 "A Physiologically-based Model for
     // Simulation of Color Vision Deficiency" — severity 1.0 (full sim).
-    const DEUT = [
+    type Matrix3 = readonly [readonly [number, number, number], readonly [number, number, number], readonly [number, number, number]];
+    const DEUT: Matrix3 = [
       [0.367, 0.861, -0.228],
       [0.280, 0.673, 0.047],
       [-0.012, 0.043, 0.969],
-    ] as const;
-    const PROT = [
+    ];
+    const PROT: Matrix3 = [
       [0.152, 1.053, -0.205],
       [0.115, 0.786, 0.099],
       [-0.004, -0.048, 1.052],
-    ] as const;
+    ];
 
     function hslToRgb(h: number, s: number, l: number): [number, number, number] {
       s /= 100; l /= 100;
@@ -93,12 +94,12 @@ describe("R4.9 agent-colors palette extension (spec-v3.1 §2)", () => {
       if (!m) throw new Error(`bad hsl: ${s}`);
       return [Number(m[1]), Number(m[2]), Number(m[3])];
     }
-    function applyMatrix(rgb: [number, number, number], M: typeof DEUT): [number, number, number] {
+    function applyMatrix(rgb: [number, number, number], M: Matrix3): [number, number, number] {
       const [r, g, b] = rgb;
       return [
-        M[0]![0]! * r + M[0]![1]! * g + M[0]![2]! * b,
-        M[1]![0]! * r + M[1]![1]! * g + M[1]![2]! * b,
-        M[2]![0]! * r + M[2]![1]! * g + M[2]![2]! * b,
+        M[0][0] * r + M[0][1] * g + M[0][2] * b,
+        M[1][0] * r + M[1][1] * g + M[1][2] * b,
+        M[2][0] * r + M[2][1] * g + M[2][2] * b,
       ];
     }
     function delta(a: [number, number, number], b: [number, number, number]): number {
