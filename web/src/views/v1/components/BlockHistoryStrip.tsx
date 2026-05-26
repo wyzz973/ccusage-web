@@ -3,7 +3,7 @@ import { AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn, formatCost, formatNumber } from "@/lib/utils";
 import { formatPct } from "../lib/format";
-import { SEMANTIC } from "../lib/agent-colors";
+import { AGENT_COLORS, AGENT_LABEL, SEMANTIC, toAgentKey } from "../lib/agent-colors";
 import { LimitResetBannerV1 } from "./LimitResetBannerV1";
 import { useV1Store } from "../data/v1-store";
 import type { Block, Derived } from "@/types";
@@ -49,6 +49,12 @@ function readInitialBlocksDesc(): boolean {
 
 export function BlockHistoryStrip({ blocks, limitReset, x1BannerActive = false }: BlockHistoryStripProps): JSX.Element {
   const perBlockTokenLimit = useV1Store((s) => s.mode.perBlockTokenLimit);
+  // R4.5 B15 — scope toggle. `recent` (default) shows the existing
+  // active-block card + trailing-N strip. `all` swaps to a virtualized
+  // list of every non-active block per spec-v3.1 §3.5.
+  const blocksScope = useV1Store((s) => s.blocksScope);
+  const setBlocksScope = useV1Store((s) => s.setBlocksScope);
+  const allListShown = blocksScope === "all";
   const usable = blocks.filter((b) => !b.isGap);
   const active = usable.find((b) => b.isActive) ?? null;
   // R3.3 — desc default (newest-on-right). When user toggles to asc, we
@@ -68,19 +74,95 @@ export function BlockHistoryStrip({ blocks, limitReset, x1BannerActive = false }
   const cap = Math.max(1, ...trailing.map((b) => b.costUSD));
   const activePct = active ? Math.min(1.5, active.costUSD / cap) : 0;
 
+  // R4.5 B15 — full list (non-active blocks, virtualized via overflow:auto).
+  const allBlocks = useMemo(() => usable.filter((b) => !b.isActive), [usable]);
+
   return (
     <Card data-testid="block-history-strip">
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-base text-foreground">5-hour block</CardTitle>
-        <span className="text-[11px] font-mono tabular-nums text-muted-foreground">
-          {active ? `${recent.length + 1} of ${trailing.length} on record` : `${recent.length} on record`}
-        </span>
+        <div className="flex items-center gap-2">
+          {!allListShown && (
+            <span className="text-[11px] font-mono tabular-nums text-muted-foreground">
+              {active ? `${recent.length + 1} of ${trailing.length} on record` : `${recent.length} on record`}
+            </span>
+          )}
+          {/* R4.5 B15 — Recent/All segmented toggle (spec-v3.1 §3.5).
+              Same radio-group pattern as R3.8 donut scope (no Tabs primitive
+              dependency; zero bundle add). */}
+          <div
+            role="radiogroup"
+            aria-label="Blocks scope"
+            className="inline-flex rounded-md border border-border p-0.5 text-[10px]"
+          >
+            {(["recent", "all"] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                role="radio"
+                aria-checked={blocksScope === s}
+                onClick={() => setBlocksScope(s)}
+                data-testid={`blocks-tab-${s}`}
+                className={cn(
+                  "rounded px-2 py-0.5",
+                  blocksScope === s ? "bg-zinc-800 text-zinc-50" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {s === "recent" ? "Recent" : "All"}
+              </button>
+            ))}
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* R4.5 B15 — All view (virtualized via overflow:auto so the
+            DOM stays bounded). Active-block card + trailing strip are
+            hidden in this scope because the user is surveying history. */}
+        {allListShown && (
+          <div data-testid="blocks-all-list" className="space-y-0.5 max-h-[420px] overflow-auto pr-1">
+            <div className="flex items-center justify-between border-b border-border/40 pb-1.5 mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span>{allBlocks.length} past blocks</span>
+              <span>cost · % of cap</span>
+            </div>
+            {allBlocks.map((b) => {
+              const t = new Date(b.startTime);
+              const date = t.toISOString().slice(0, 10);
+              const time = t.toUTCString().slice(17, 22);
+              const ak = toAgentKey(b.models[0] ?? "unknown");
+              const pct = Math.min(1.5, b.costUSD / cap);
+              const topModel = b.models[0] ?? "—";
+              return (
+                <div
+                  key={b.id}
+                  className="flex items-center gap-2 rounded px-1.5 py-1 hover:bg-muted/30 text-[11px]"
+                  title={`${date} ${time} — ${topModel}`}
+                >
+                  <span
+                    className="h-1.5 w-1.5 rounded-full shrink-0"
+                    style={{ background: AGENT_COLORS[ak] }}
+                    aria-label={AGENT_LABEL[ak]}
+                  />
+                  <span className="w-16 font-mono tabular-nums text-zinc-200">{date}</span>
+                  <span className="w-12 font-mono tabular-nums text-muted-foreground">{time}</span>
+                  <span className="flex-1 truncate text-muted-foreground">{topModel}</span>
+                  <span className="w-14 text-right font-mono tabular-nums text-zinc-100">{formatCost(b.costUSD)}</span>
+                  <span
+                    className="w-12 text-right font-mono tabular-nums"
+                    style={{ color: tintFor(pct) }}
+                  >
+                    {formatPct(pct)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {/* R3.7 single-banner invariant: when X1 is up, D9 has already
-            been folded into the X1 body — don't render it again here. */}
-        {!x1BannerActive && <LimitResetBannerV1 limitReset={limitReset} />}
-        {active ? (
+            been folded into the X1 body — don't render it again here.
+            R4.5 B15: also hidden in the `all` scope per spec-v3.1 §3.5. */}
+        {!allListShown && !x1BannerActive && <LimitResetBannerV1 limitReset={limitReset} />}
+        {!allListShown && (active ? (
           <div>
             <div className="flex items-baseline justify-between">
               <span className="text-3xl font-mono font-semibold tabular-nums">{formatPct(activePct)}</span>
@@ -125,9 +207,9 @@ export function BlockHistoryStrip({ blocks, limitReset, x1BannerActive = false }
           </div>
         ) : (
           <div className="text-sm text-muted-foreground">No active block</div>
-        )}
+        ))}
 
-        {recent.length > 0 && (
+        {!allListShown && recent.length > 0 && (
           <div>
             <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
               <span>Last {recent.length} blocks · % of cap</span>
@@ -163,7 +245,7 @@ export function BlockHistoryStrip({ blocks, limitReset, x1BannerActive = false }
           </div>
         )}
 
-        {active && (
+        {!allListShown && active && (
           <div className={cn("flex items-center gap-2 rounded-md border px-2 py-1 text-xs",
             activePct > 0.95
               ? "border-rose-400/40 bg-rose-400/5 text-rose-300"

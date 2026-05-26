@@ -55,6 +55,13 @@ export interface ModeState {
    * `null` = no cap; chip never fires.
    */
   perBlockTokenLimit: number | null;
+  /**
+   * R4.6 (spec-v3.1 §3.2) — `--config <path>` UI for the R3.1
+   * server-side flag passthrough. Empty string = use defaults; any
+   * non-empty path POSTs through to `/api/snapshot?config=<path>`. Cross-
+   * mode pref, so the storage key is `ccusage.config` (no `v1.` prefix).
+   */
+  configPath: string;
 }
 
 // R3.6 — per-agent fan-out result (spec-v3 §3.2 state machine).
@@ -76,6 +83,9 @@ export interface PerAgentResult {
 
 // R3.8 — donut window scope: "window" = the selected B0 range; "all" = lifetime.
 export type DonutScope = "window" | "all";
+
+// R4.5 B15 — BlocksPanel scope: "recent" = trailing-N; "all" = full virtualized list.
+export type BlocksScope = "recent" | "all";
 
 interface V1State {
   view: ViewMode;
@@ -104,6 +114,9 @@ interface V1State {
 
   // R3.8 — donut window scope toggle.
   donutScope: DonutScope;
+
+  // R4.5 B15 — BlocksPanel scope toggle.
+  blocksScope: BlocksScope;
 
   // R3.6 — per-agent fan-out state. Populated by `fetchPerAgent` calls.
   perAgent: PerAgentResult;
@@ -137,6 +150,9 @@ interface V1State {
   // R3.8
   setDonutScope(s: DonutScope): void;
 
+  // R4.5 B15
+  setBlocksScope(s: BlocksScope): void;
+
   // R3.6 — per-agent state machine transitions. Components call
   // `setPerAgent("loading")` synchronously before the fetch hop so the
   // 100ms skeleton gate (spec-v3 §1.4) renders immediately.
@@ -165,6 +181,10 @@ const LS = {
   perBlockTokenLimit: "ccusage.budget.tokenLimit",
   // R3.8 — donut scope persists across reloads.
   donutScope: "ccusage.v1.donut.scope",
+  // R4.6 — config-path (cross-mode pref, no v1 prefix per designer ack)
+  configPath: "ccusage.config",
+  // R4.5 B15 — blocks-panel Recent/All scope toggle
+  blocksScope: "ccusage.v1.blocks.scope",
 } as const;
 
 const VALID_VIEW = new Set<ViewMode>(["aggregate", "by-agent"]);
@@ -173,6 +193,7 @@ const VALID_MODE = new Set<TrendMode>(["aggregate", "stacked", "100", "lines"]);
 const VALID_PRESET = new Set<RangePreset>(["today", "7d", "30d", "90d", "this-mo", "last-mo", "custom"]);
 const VALID_COST_MODE = new Set<CostMode>(["calculate", "auto", "display"]);
 const VALID_DONUT_SCOPE = new Set<DonutScope>(["window", "all"]);
+const VALID_BLOCKS_SCOPE = new Set<BlocksScope>(["recent", "all"]);
 
 function parseFiniteNumber(s: string): number | null {
   if (!s) return null;
@@ -198,6 +219,7 @@ function defaultMode(): ModeState {
   return {
     costMode: "calculate", offline: false, nativeParser: false, timezone: tz,
     monthlyCapUSD: null, perBlockTokenLimit: null,
+    configPath: "",
   };
 }
 
@@ -230,6 +252,7 @@ export const useV1Store = create<V1State>((set, get) => ({
     timezone: readLS<string>(LS.tz, defaultMode().timezone, (s) => s || defaultMode().timezone),
     monthlyCapUSD:      readLS<number | null>(LS.monthlyCapUSD,      null, parseFiniteNumber),
     perBlockTokenLimit: readLS<number | null>(LS.perBlockTokenLimit, null, parseFiniteNumber),
+    configPath:         readLS<string>(LS.configPath, "", (s) => s ?? ""),
   },
   settingsOpen: false,
 
@@ -239,6 +262,7 @@ export const useV1Store = create<V1State>((set, get) => ({
 
   x1BannerDismissedFor: null,
   donutScope: readLS<DonutScope>(LS.donutScope, "window", (s) => (VALID_DONUT_SCOPE.has(s as DonutScope) ? s as DonutScope : "window")),
+  blocksScope: readLS<BlocksScope>(LS.blocksScope, "recent", (s) => (VALID_BLOCKS_SCOPE.has(s as BlocksScope) ? s as BlocksScope : "recent")),
   perAgent: defaultPerAgent(),
 
   setView(v) { writeLS(LS.view, v); set({ view: v }); },
@@ -288,6 +312,7 @@ export const useV1Store = create<V1State>((set, get) => ({
     if (patch.perBlockTokenLimit !== undefined) {
       writeLS(LS.perBlockTokenLimit, next.perBlockTokenLimit == null ? "" : String(next.perBlockTokenLimit));
     }
+    if (patch.configPath !== undefined) writeLS(LS.configPath, next.configPath);
     set({ mode: next });
   },
   resetMode() {
@@ -298,6 +323,7 @@ export const useV1Store = create<V1State>((set, get) => ({
     writeLS(LS.tz, m.timezone);
     writeLS(LS.monthlyCapUSD, "");
     writeLS(LS.perBlockTokenLimit, "");
+    writeLS(LS.configPath, "");
     set({ mode: m });
   },
   setSettingsOpen(b) { set({ settingsOpen: b }); },
@@ -311,6 +337,8 @@ export const useV1Store = create<V1State>((set, get) => ({
   dismissX1BannerToday(today) { set({ x1BannerDismissedFor: today }); },
 
   setDonutScope(s) { writeLS(LS.donutScope, s); set({ donutScope: s }); },
+
+  setBlocksScope(s) { writeLS(LS.blocksScope, s); set({ blocksScope: s }); },
 
   setPerAgent(state) { set({ perAgent: state }); },
   setPerAgentLoading() {
@@ -340,6 +368,7 @@ export function __resetV1StoreForTests(): void {
     limitResetDismissed: false,
     x1BannerDismissedFor: null,
     donutScope: "window",
+    blocksScope: "recent",
     perAgent: defaultPerAgent(),
   });
 }
@@ -351,7 +380,8 @@ export function isModeDefault(m: ModeState): boolean {
     && !m.offline && !m.nativeParser
     && m.timezone === d.timezone
     && m.monthlyCapUSD === d.monthlyCapUSD
-    && m.perBlockTokenLimit === d.perBlockTokenLimit;
+    && m.perBlockTokenLimit === d.perBlockTokenLimit
+    && m.configPath === d.configPath;
 }
 
 export function formatRangeLabel(r: Range): string {

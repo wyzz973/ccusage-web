@@ -192,11 +192,22 @@ export function applySessionFilters(records: UsageRecord[], filters: FilterChip[
   }
   const ql = q.trim().toLowerCase();
   if (ql) {
-    r = r.filter((s) =>
-      s.period.toLowerCase().includes(ql) ||
-      (s.project ?? "").toLowerCase().includes(ql) ||
-      s.modelsUsed.some((m) => m.toLowerCase().includes(ql)),
-    );
+    // R4.5 B14 — `id:<substring>` prefix narrows the search to session
+    // ID startsWith match (case-insensitive). Other prefixes are reserved
+    // for future use; bare query falls through to the existing
+    // multi-field substring match.
+    if (ql.startsWith("id:")) {
+      const idQuery = ql.slice(3).trim();
+      if (idQuery !== "") {
+        r = r.filter((s) => s.period.toLowerCase().startsWith(idQuery));
+      }
+    } else {
+      r = r.filter((s) =>
+        s.period.toLowerCase().includes(ql) ||
+        (s.project ?? "").toLowerCase().includes(ql) ||
+        s.modelsUsed.some((m) => m.toLowerCase().includes(ql)),
+      );
+    }
   }
   return r;
 }

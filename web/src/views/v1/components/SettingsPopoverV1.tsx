@@ -11,6 +11,7 @@
 // flagged for the range picker's TZ list. The Settings TZ list also caps
 // at a curated subset; full Intl.supportedValuesOf integration is D12.v2.)
 
+import { useCallback, useEffect, useState } from "react";
 import { Settings } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Switch } from "./ui/switch";
@@ -142,6 +143,15 @@ export function SettingsPopoverV1(): JSX.Element {
           </div>
         </fieldset>
 
+        {/* R4.6 — Config file (spec-v3.1 §3.2). Vertical stack between
+            Connectivity and Timezone per PRD §7 Q2. debounced-blur +
+            Enter-commit + Esc-revert per §3.3.2 (same convention as
+            budget inputs). Empty string clears the active config. */}
+        <ConfigPathInput
+          value={mode.configPath}
+          onCommit={(v) => setMode({ configPath: v })}
+        />
+
         {/* D12 — Timezone (native <select>; popover is the only one open so
             no nested-popover trap to worry about). */}
         <fieldset className="space-y-1.5">
@@ -207,8 +217,70 @@ export function SettingsPopoverV1(): JSX.Element {
             <div className="text-[10px] text-muted-foreground">Chip fires when active-block projection exceeds limit</div>
           </div>
         </fieldset>
+
+        {/* R4.5 B12 — Debug snapshot link in popover footer next to
+            Reset link (separator `·`). Opens GET /api/debug in a new
+            tab; matches the UI-UX prototype-v4 anchor. */}
+        <div className="flex items-center justify-end gap-2 text-[10px] text-muted-foreground">
+          {dot && (
+            <button
+              type="button"
+              onClick={resetMode}
+              className="text-sky-300 hover:text-sky-200"
+              data-testid="settings-reset-footer"
+            >
+              Reset
+            </button>
+          )}
+          {dot && <span aria-hidden="true">·</span>}
+          <a
+            href="/api/debug"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-foreground"
+            data-testid="settings-debug-link"
+          >
+            Debug snapshot
+          </a>
+        </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/**
+ * R4.6 — Config-file path input with debounced-blur + Enter-commit +
+ * Esc-revert semantics (same convention as budget inputs per
+ * spec-v3.1 §3.3.2). Local draft buffer keeps the input responsive
+ * without triggering a store write on every keystroke.
+ */
+function ConfigPathInput({ value, onCommit }: { value: string; onCommit: (v: string) => void }): JSX.Element {
+  const [draft, setDraft] = useState(value);
+  // Sync draft when the store value changes externally (e.g. resetMode).
+  useEffect(() => { setDraft(value); }, [value]);
+  const commit = useCallback(() => {
+    if (draft !== value) onCommit(draft);
+  }, [draft, value, onCommit]);
+  return (
+    <fieldset className="space-y-1.5">
+      <legend className="text-[10px] uppercase tracking-wider text-muted-foreground">Config file</legend>
+      <input
+        type="text"
+        spellCheck={false}
+        placeholder="/Users/me/.ccusage/ccusage.json"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); commit(); }
+          if (e.key === "Escape") { setDraft(value); (e.target as HTMLInputElement).blur(); }
+        }}
+        className="h-8 w-full rounded-md border border-border bg-transparent px-2 text-xs font-mono text-zinc-100"
+        aria-label="Config file path"
+        data-testid="settings-config-path"
+      />
+      <div className="text-[10px] text-muted-foreground">Path to a JSON config. Empty = use defaults.</div>
+    </fieldset>
   );
 }
 

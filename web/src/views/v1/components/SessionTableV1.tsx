@@ -157,7 +157,7 @@ export function SessionTableV1({
           Sessions <span className="ml-1 text-xs text-muted-foreground">({rows.length})</span>
         </CardTitle>
         <Input
-          placeholder="Search sessions"
+          placeholder="Search sessions… (try id:abc12)"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           className="h-8 w-56"

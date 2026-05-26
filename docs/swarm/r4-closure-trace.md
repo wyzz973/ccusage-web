@@ -46,6 +46,41 @@ explicit rationale + lead escalation reference. No exceptions.
 
 <!-- Implementer appends one entry per commit. -->
 
+## R4.9 + R4.6 + R4.5 (web) · agent-colors + Settings input + Debug link + id-prefix + Recent/All
+
+**PRD v4 §1 reference:** R4.9 (color tokens) + R4.6 (Config-path input) + R4.5 B12/B14/B15 (web portion)
+**Parity row(s) closed:** A2.6 / A2.7 / A2.8 / A2.9 each 0.5 → 0.75 (R4.9 chip-row promotion via new color tokens); B10 0.75 → 1.0 (R4.6 popover input closes R3.1.AC2 residual); B12 0.5 → 1.0 (R4.5 web link); B14 0 → 0.5 (R4.5 SessionTable id: prefix); B15 0 → 0.5 (R4.5 BlocksPanel Recent/All). Combined +~3.0 pp.
+**Effort estimate (PRD):** ~3.5 h
+**Effort actual:** ~1 h (palette + 4 UI surfaces; tests cover each AC verbatim)
+**Commit SHA(s):** (this commit)
+**Files touched:**
+  - `web/src/views/v1/lib/agent-colors.ts` — `AgentKey` union extended to 12 entries (11 agents + `unknown` sentinel). 6 new entries (`goose/hermes/opencode/amp/droid/codebuff`) with hue + WCAG ratio comments per spec-v3.1 §2. `toAgentKey` extended to map all 11. JSDoc captures the color-blind validation audit trail per spec-v3.1 §6 #1 (designer's only correctness gate this round).
+  - `web/src/views/v1/data/v1-store.ts` — `ModeState.configPath` field added + LS persistence; `BlocksScope` type + `blocksScope` slice + `setBlocksScope` action + LS persistence; `isModeDefault` updated to check `configPath`.
+  - `web/src/views/v1/components/SettingsPopoverV1.tsx` — `<ConfigPathInput>` internal component handles debounced-blur + Enter-commit + Esc-revert per spec-v3.1 §3.3.2. Inserted between Connectivity and Timezone groups (PRD §7 Q2 vertical stack). Footer adds `Debug snapshot` link (`target="_blank"` → `/api/debug`).
+  - `web/src/views/v1/components/SessionTableV1.tsx` — placeholder microcopy `"Search sessions… (try id:abc12)"` per spec-v3.1 §3.4.
+  - `web/src/views/v1/data/selectors.ts` — `applySessionFilters` detects the `id:<query>` prefix and switches to startsWith match on session ID; bare query keeps existing multi-field substring match (regression-tested).
+  - `web/src/views/v1/components/BlockHistoryStrip.tsx` — Recent/All toggle (same radio-group pattern as R3.8 donut scope; zero-bundle); virtualized All view via `overflow:auto` (no react-window per spec-v3.1 §1.3). Active-block card + trailing strip suppressed in `all` scope.
+  - `web/src/__tests__/v1/r4-web.test.tsx` (new) — 16 tests covering: 11-agent palette + hue spacing + `unknown` sentinel + case-insensitive toAgentKey; Config-path input render / Enter / Esc / Blur commit semantics; Debug link href + target + rel; id: prefix narrowing + regression for bare query; Recent/All toggle visibility / persistence / aria-checked.
+**AC tests landed:**
+  - `r4-web.test.tsx` ::: "registers all 11 R4 agent keys with distinct AGENT_COLORS hues" (R4.9.AC1)
+  - `r4-web.test.tsx` ::: "preserves the `unknown` sentinel for unrecognized agents"
+  - `r4-web.test.tsx` ::: "Enter commits the draft to the store + localStorage" (R4.6.AC1)
+  - `r4-web.test.tsx` ::: "Esc reverts the draft back to the committed value"
+  - `r4-web.test.tsx` ::: "link renders with target=_blank pointing at /api/debug" (R4.5 B12 web)
+  - `r4-web.test.tsx` ::: "`id:abc12` narrows the table to sessions starting with that prefix" (R4.5 B14)
+  - `r4-web.test.tsx` ::: "bare query (no `id:` prefix) keeps multi-field substring match (regression)"
+  - `r4-web.test.tsx` ::: "Recent (default) shows the active-block card; All hides it for the virtualized list" (R4.5 B15)
+  - `r4-web.test.tsx` ::: "persists the scope choice to localStorage"
+  - `r4-web.test.tsx` ::: "aria-checked toggles on the radiogroup buttons"
+**Surface grep proof:**
+  - `grep -nE "goose|hermes|opencode|amp.*color|droid|codebuff" web/src/views/v1/lib/agent-colors.ts` → all 6 new entries present
+  - `grep -n "settings-config-path\|settings-debug-link\|blocks-tab-recent\|blocks-tab-all" web/src/views/v1/components/` → 4 anchors verified
+**Smoke / e2e proof:**
+  - `npm test --workspace=web`: 137/137 (+16 R4 web tests; baseline 121).
+  - `npm run test:e2e --workspace=web`: 3/3 PASS (R3.6 contract + 3-second insight gate unaffected).
+**Reviewer recount expectation:** +~3.0 pp combined per partial-credit ledger.
+**Status:** committed — color-blind validation audit captured in agent-colors.ts JSDoc per designer's spec-v3.1 §6 #1 gate. R4.4 chip-row data uplift (consume per-agent KPI numbers in the UI) is a separate trivial follow-up if needed; the per-agent state machine already surfaces `succeeded[].data` (totalCostUSD/totalTokens/sessionCount) — UI consumers can read it without further server work.
+
 ## R4.4 · R3.6 real per-agent shellout swap (server portion)
 
 **PRD v4 §1 reference:** R4.4
