@@ -140,4 +140,78 @@ describe("poller", () => {
     expect(store.getHealth().lastError).toMatch(/bad/);
     expect(store.get()).toBeNull();
   });
+
+  // R4.1 + R4.2 — per-source non-Claude fan-out (Hermes, Goose).
+  it("R4.1+R4.2: extraAgentsFetcher merges per-source sessions; detectedAgents picks them up", async () => {
+    const store = createSnapshotStore();
+    const runMock = vi.fn(async (cmd: string) => {
+      if (cmd === "session") {
+        return { session: [{
+          period: "claude-sess-1", agent: "claude",
+          totalTokens: 100, totalCost: 1,
+          inputTokens: 60, outputTokens: 40, cacheCreationTokens: 0, cacheReadTokens: 0,
+          modelsUsed: [], modelBreakdowns: [],
+          metadata: { lastActivity: `${TODAY}T11:55:00Z` },
+        }] };
+      }
+      return { [cmd]: [] };
+    });
+    const extraAgentsFetcher = vi.fn(async (agents: readonly string[]) => agents.map((agent) => ({
+      period: `${agent}-sess-A`, agent,
+      totalTokens: 50, totalCost: 0.5,
+      inputTokens: 30, outputTokens: 20, cacheCreationTokens: 0, cacheReadTokens: 0,
+      modelsUsed: [], modelBreakdowns: [],
+      metadata: { lastActivity: `${TODAY}T11:50:00Z` },
+    })));
+    const poller = createPoller({
+      store,
+      runCcusage: runMock as never,
+      getVersion: async () => "20.0.0",
+      intervalMs: 10_000,
+      now: () => new Date(`${TODAY}T12:00:00Z`),
+      extraAgentsFetcher,
+      extraAgents: ["hermes", "goose"],
+    });
+    await poller.runOnce();
+    expect(extraAgentsFetcher).toHaveBeenCalledWith(["hermes", "goose"]);
+    const snap = store.get();
+    expect(snap?.session.records).toHaveLength(3); // 1 claude + hermes + goose
+    expect(snap?.derived.detectedAgents).toEqual(["claude", "goose", "hermes"]);
+  });
+
+  it("R4.1+R4.2: extraAgentsFetcher failure is non-fatal (snapshot still publishes)", async () => {
+    const store = createSnapshotStore();
+    const runMock = vi.fn(async (cmd: string) => ({ [cmd]: [] }));
+    const extraAgentsFetcher = vi.fn(async () => { throw new Error("ccusage hermes binary missing"); });
+    const poller = createPoller({
+      store,
+      runCcusage: runMock as never,
+      getVersion: async () => "20.0.0",
+      intervalMs: 10_000,
+      now: () => new Date(`${TODAY}T12:00:00Z`),
+      extraAgentsFetcher,
+      extraAgents: ["hermes"],
+    });
+    await poller.runOnce();
+    // Snapshot still published; just without the extra agents.
+    expect(store.get()).toBeTruthy();
+    expect(store.get()?.session.records).toEqual([]);
+  });
+
+  it("R4.1+R4.2: extraAgents=[] disables fan-out entirely", async () => {
+    const store = createSnapshotStore();
+    const runMock = vi.fn(async (cmd: string) => ({ [cmd]: [] }));
+    const extraAgentsFetcher = vi.fn(async () => []);
+    const poller = createPoller({
+      store,
+      runCcusage: runMock as never,
+      getVersion: async () => "20.0.0",
+      intervalMs: 10_000,
+      now: () => new Date(`${TODAY}T12:00:00Z`),
+      extraAgentsFetcher,
+      extraAgents: [],
+    });
+    await poller.runOnce();
+    expect(extraAgentsFetcher).not.toHaveBeenCalled();
+  });
 });

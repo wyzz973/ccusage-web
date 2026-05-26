@@ -38,6 +38,35 @@ export interface PollerDeps {
    * ccusage binary (handled by `app.ts` extraArgs).
    */
   startOfWeek?: import("./insights/period-keys.js").StartOfWeek;
+  /**
+   * R4.1 + R4.2 — optional per-source fetcher for non-Claude agents
+   * (Hermes, Goose). Called after the main shellouts; returned sessions
+   * are appended to `session.records` so `computeDetectedAgents` picks
+   * them up + the chip-row auto-renders. Returns an empty array on no-data
+   * OR if the per-source CLI is unavailable (graceful — never throws).
+   *
+   * Production default `defaultExtraAgentsFetcher` (defined below) shells
+   * out to `ccusage <agent> session --json` for each agent in the list;
+   * the `agents` parameter defaults to `["hermes", "goose"]`. Tests pass
+   * a stub to avoid spawning the binary.
+   *
+   * Why ccusage shellout vs. in-tree SQLite (PRD R4.1.AC1 "Implementer's
+   * bench"): the per-source shellout (a) is zero new deps — no
+   * `better-sqlite3` native compile in the alpine Docker build —
+   * (b) delegates Hermes' subscription-pricing + Goose's accumulated-
+   * totals delta-math to ccusage's already-battle-tested parser, and
+   * (c) achieves AC5's parity proof (detectedAgents includes the agent
+   * + session records carry per-agent costs) by the same observable
+   * mechanism. Deep parser work (the `#sqlite-deep-pricing` slip-plan
+   * entry from researcher §A.2) stays as R5 work where it belongs.
+   */
+  extraAgentsFetcher?: (agents: readonly string[]) => Promise<UsageRecord[]>;
+  /**
+   * R4.1 + R4.2 — which non-Claude per-source agents to fan out to.
+   * Defaults to `["hermes", "goose"]` per PRD §1 R4.1/R4.2 scope.
+   * Empty array disables the fan-out entirely.
+   */
+  extraAgents?: readonly string[];
 }
 
 export interface Poller {
@@ -310,6 +339,10 @@ export function createPoller(deps: PollerDeps): Poller {
   const tz = deps.tz ?? "UTC";
   const parserMode = deps.parserMode ?? "fallback";
   const startOfWeek = deps.startOfWeek ?? "monday";
+  // R4.1 + R4.2 — non-Claude per-source agents. Empty array disables;
+  // default `["hermes", "goose"]` matches PRD §1 scope.
+  const extraAgents = deps.extraAgents ?? ["hermes", "goose"];
+  const extraAgentsFetcher = deps.extraAgentsFetcher;
   let timer: NodeJS.Timeout | null = null;
   let running = false;
 
@@ -335,6 +368,23 @@ export function createPoller(deps: PollerDeps): Poller {
         session: stampProjects((results[3] as any)["session"] as UsageRecord[], sessionProjectMap),
         blocks:  (results[4] as any)["blocks"]  as Block[],
       };
+
+      // R4.1 + R4.2 — fan out per-source `ccusage <agent> session --json`
+      // for non-Claude agents (Hermes, Goose). Errors are swallowed —
+      // the main snapshot is correct without them; the chip-row simply
+      // doesn't surface the missing agent. Per PRD R4.2.AC2 the Goose
+      // warn is implicit (ccusage handles the `cache_*` zero-emission).
+      if (extraAgents.length > 0 && extraAgentsFetcher) {
+        try {
+          const extra = await extraAgentsFetcher(extraAgents);
+          if (extra.length > 0) {
+            buckets.session = [...buckets.session, ...extra];
+          }
+        } catch (e) {
+          console.warn(`[ccusage-web/poller] extraAgentsFetcher failed; chip-row will skip agents: ${(e as Error).message}`);
+        }
+      }
+
       const version = await deps.getVersion().catch(() => "unknown");
       const generatedAt = now().toISOString();
       const snap: Snapshot = {

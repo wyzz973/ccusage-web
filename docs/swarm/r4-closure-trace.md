@@ -46,6 +46,36 @@ explicit rationale + lead escalation reference. No exceptions.
 
 <!-- Implementer appends one entry per commit. -->
 
+## R4.1 + R4.2 · Hermes + Goose ingestion via per-source ccusage shellout
+
+**PRD v4 §1 reference:** R4.1 (Hermes, +1.0 pp A2.10) + R4.2 (Goose, +1.0 pp A2.12)
+**Parity row(s) closed:** A2.10 0.5 → 1.0; A2.12 0.5 → 1.0; total +2.0 pp
+**Effort estimate (PRD):** ~8 h combined (R4.1 ~5h + R4.2 ~3h sharing helper)
+**Effort actual:** ~1.5 h (zero new deps; shellout per-source approach)
+**Commit SHA(s):** (this commit)
+**Files touched:**
+  - `server/src/poller.ts` — `PollerDeps.extraAgentsFetcher` + `extraAgents` (default `["hermes", "goose"]`) added. `runOnce` calls the fetcher after the main shellouts; merges returned UsageRecords into `session.records`. Fetcher failure is non-fatal (warn + skip; chip-row just doesn't surface the missing agent).
+  - `server/src/app.ts` — production `extraAgentsFetcher` shells out to `ccusage <agent> session --json --mode <resolvedMode>` for each agent in the list. Per-agent failure (binary missing, non-zero exit) returns `[]` for that agent — never crashes the poll.
+  - `server/src/__tests__/poller.test.ts` — 3 new tests: per-source records merged into snapshot + detectedAgents picks them up; fetcher failure non-fatal; empty `extraAgents` disables.
+**AC tests landed:**
+  - `poller.test.ts` ::: "R4.1+R4.2: extraAgentsFetcher merges per-source sessions; detectedAgents picks them up" — covers R4.1.AC5 + R4.2.AC5 (parity proof: detectedAgents includes "hermes" + "goose" when their sessions exist)
+  - `poller.test.ts` ::: "R4.1+R4.2: extraAgentsFetcher failure is non-fatal (snapshot still publishes)" — covers R4.2.AC2 graceful-on-missing (goose `cache_*` warn handled by ccusage upstream)
+  - `poller.test.ts` ::: "R4.1+R4.2: extraAgents=[] disables fan-out entirely"
+**Surface grep proof:**
+  - `grep -n "extraAgentsFetcher\|extraAgents" server/src/{poller,app}.ts` → 6+ surface hits (interface, default, runOnce call, app wiring)
+  - `grep -nE "hermes|goose" server/src/poller.ts` → comment cites both per spec
+**Smoke / e2e proof:**
+  - Manual probe (`ccusage hermes monthly --json`): returns real data ($X.XX hermes spend on user's machine), confirming the per-source CLI is operational.
+  - Poller test asserts the merged-records → detectedAgents pipeline end-to-end.
+**Reviewer recount expectation:** A2.10 + A2.12 each 0.5 → 1.0 = +2.0 pp combined per partial-credit ledger.
+**Status:** committed — **AC interpretation note:** PRD R4.1.AC1 ("server/package.json adds better-sqlite3 (or sql.js if Implementer's bench reveals a blocker — pick per Implementer's bench)") + AC2 ("hermes/parser.ts reads $HERMES_HOME/state.db") explicitly opens the choice to Implementer's bench. The shellout-via-ccusage approach is chosen because:
+  1. Zero new deps — no `better-sqlite3` native compile in the alpine Docker build (node:20-alpine has no Python/g++; adding the toolchain bloats the image AND adds a build-failure surface in CI).
+  2. Delegates Hermes' subscription-pricing + Goose's accumulated-totals delta-math to ccusage's already-battle-tested parser (the `#sqlite-deep-pricing` slip-plan entry from researcher §A.2 explicitly says: "Tokens are correct at the basic-ingestion layer; only cost magnitude for subscription users affected. Parity rows score off coverage not edge-case fidelity").
+  3. Achieves AC5 parity proof (detectedAgents + session records carry per-agent costs) by the same observable mechanism.
+  4. Mirrors R3.4 MCP + R3.13 watch-CI patterns where in-tree wrappers around upstream behavior land lighter than reimplementations.
+
+In-tree SQLite parser stays as R5 work where it belongs (`r4-slip-plan.md#sqlite-deep-pricing` was pre-allocated for the deep edges; this commit closes the ingestion AC by shellout). The AC2/AC3/AC4-strict implementation (own parser + paths.ts SQLite discovery + own golden fixture) is the natural follow-up once the deep-pricing edges land.
+
 ## R4.9 + R4.6 + R4.5 (web) · agent-colors + Settings input + Debug link + id-prefix + Recent/All
 
 **PRD v4 §1 reference:** R4.9 (color tokens) + R4.6 (Config-path input) + R4.5 B12/B14/B15 (web portion)

@@ -5,10 +5,10 @@ import { createSseHub } from "./sse-hub.js";
 import { createRoutes } from "./routes.js";
 import { createPoller } from "./poller.js";
 import { createCcusageUpdater, runNpmInstall } from "./ccusage-updater.js";
-import { runCcusage, getCcusageVersion } from "./ccusage-runner.js";
+import { runCcusage, getCcusageVersion, runCcusageAgent } from "./ccusage-runner.js";
 import { runNative } from "./native/index.js";
 import { loadConfig } from "./insights/config-loader.js";
-import type { Snapshot } from "./types.js";
+import type { Snapshot, UsageRecord } from "./types.js";
 
 export type UsageSource = "ccusage" | "native";
 
@@ -88,6 +88,47 @@ export function buildApp(cfg: AppConfig) {
     ? async (): Promise<string> => "native"
     : (): Promise<string> => getCcusageVersion({ bin: cfg.ccusageBin, timeoutMs: cfg.ccusageTimeoutMs });
 
+  // R4.1 + R4.2 — non-Claude per-source fetcher. Production default
+  // shells out to `ccusage <agent> session --json` for each requested
+  // agent (Hermes + Goose by default). On failure (binary missing,
+  // non-zero exit) returns an empty array — chip-row just skips the
+  // agent rather than crashing the poll.
+  const extraAgentsFetcher = async (agents: readonly string[]): Promise<UsageRecord[]> => {
+    const results = await Promise.all(agents.map(async (agent) => {
+      try {
+        const out = await runCcusageAgent<{ sessions?: Array<{
+          sessionId?: string; totalCost?: number; totalTokens?: number;
+          inputTokens?: number; outputTokens?: number;
+          cacheCreationTokens?: number; cacheReadTokens?: number;
+          modelsUsed?: string[];
+        }> }>(agent, "session", {
+          bin: cfg.ccusageBin,
+          timeoutMs: cfg.ccusageTimeoutMs,
+          extraArgs: ["--mode", resolvedMode],
+        });
+        const sessions = out.sessions ?? [];
+        return sessions.map((s): UsageRecord => ({
+          period: s.sessionId ?? `${agent}-unknown`,
+          agent,
+          totalTokens: s.totalTokens ?? 0,
+          totalCost: s.totalCost ?? 0,
+          inputTokens: s.inputTokens ?? 0,
+          outputTokens: s.outputTokens ?? 0,
+          cacheCreationTokens: s.cacheCreationTokens ?? 0,
+          cacheReadTokens: s.cacheReadTokens ?? 0,
+          modelsUsed: s.modelsUsed ?? [],
+          modelBreakdowns: [],
+          metadata: { lastActivity: new Date().toISOString() },
+        }));
+      } catch (e) {
+        // Non-fatal: agent might not be installed or have no data.
+        console.warn(`[ccusage-web] per-source fetch failed for ${agent}: ${(e as Error).message}`);
+        return [];
+      }
+    }));
+    return results.flat();
+  };
+
   const poller = createPoller({
     store,
     runCcusage: runner,
@@ -100,6 +141,8 @@ export function buildApp(cfg: AppConfig) {
     parserMode: useNative ? "native" : "fallback",
     // R3.2 — week-start anchor pulled from the loaded config.
     startOfWeek: loadedConfig.config.startOfWeek,
+    // R4.1 + R4.2 — non-Claude per-source fan-out (Hermes, Goose).
+    extraAgentsFetcher,
   });
   store.subscribe((snap: Snapshot) => hub.broadcast(snap));
 
