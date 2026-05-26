@@ -65,12 +65,20 @@ export function buildApp(cfg: AppConfig) {
   if (loadedConfig.config.tokenLimit != null && loadedConfig.config.tokenLimit > 0) {
     ccusageExtraArgs.push("--token-limit", String(loadedConfig.config.tokenLimit));
   }
+  // R4.5 B16: --session-length passthrough (default 5h per iter0-R1 §5)
+  if (loadedConfig.config.sessionLengthHours != null && loadedConfig.config.sessionLengthHours > 0) {
+    ccusageExtraArgs.push("--session-length", String(loadedConfig.config.sessionLengthHours));
+  }
   // R3 §D: --mode resolved (`calculate` default; config can override).
   const resolvedMode = loadedConfig.config.costMode ?? "calculate";
   ccusageExtraArgs.push("--mode", resolvedMode);
 
   const runner = useNative
-    ? <T>(cmd: string): Promise<T> => runNative<T>(cmd, { tz: cfg.tz, mode: resolvedMode })
+    ? <T>(cmd: string): Promise<T> => runNative<T>(cmd, {
+        tz: cfg.tz,
+        mode: resolvedMode,
+        sessionLengthHours: loadedConfig.config.sessionLengthHours,
+      })
     : <T>(cmd: string): Promise<T> => runCcusage<T>(cmd, {
         bin: cfg.ccusageBin,
         timeoutMs: cfg.ccusageTimeoutMs,

@@ -69,6 +69,44 @@ export function createRoutes(deps: RoutesDeps): Router {
   });
 
   /**
+   * R4.5 B12 — debug snapshot. Returns internal state for ops + UI's
+   * "Debug snapshot" footer link (opens in new tab). Read-only; no
+   * sensitive data (snapshot is already public via `/api/snapshot`,
+   * config is already public via `/api/health`).
+   */
+  r.get("/debug", (_req, res) => {
+    const snap = deps.store.get();
+    const health = deps.store.getHealth();
+    res.json({
+      generatedAt: new Date().toISOString(),
+      health,
+      snapshot: snap ? {
+        generatedAt: snap.generatedAt,
+        ccusageVersion: snap.ccusageVersion,
+        recordCounts: {
+          daily:   snap.daily.records.length,
+          weekly:  snap.weekly.records.length,
+          monthly: snap.monthly.records.length,
+          session: snap.session.records.length,
+          blocks:  snap.blocks.records.length,
+        },
+        derived: {
+          detectedAgents: snap.derived.detectedAgents ?? [],
+          mode: snap.derived.mode ?? null,
+          activeBlockId: snap.derived.activeBlock?.id ?? null,
+          activeSessionCount: snap.derived.activeSessionCount,
+        },
+      } : null,
+      config: deps.config ? { mergedFrom: deps.config.mergedFrom, active: deps.config.config } : null,
+      // R4.5 B12.AC1 mentions pricing-snapshot date; R4.10 updated rates
+      // via hand-merge. We don't carry an explicit date field on
+      // pricing-data.ts, so surface what we have: a row count + the
+      // R4.10 marker.
+      pricing: { snapshotMarker: "R4.10-2026-11" },
+    });
+  });
+
+  /**
    * R3.12.AC3 — JSON schema endpoint for IDE autocomplete + tooling.
    * Returns the static schema verbatim with `application/schema+json`
    * content-type (per draft-07 IANA registration).
@@ -93,43 +131,72 @@ export function createRoutes(deps: RoutesDeps): Router {
     }
   });
 
+  // R4.5 B18 — `?cache=N` server-side caching window (seconds). Stored
+  // here at route-creation time so multiple requests within the window
+  // share the same response payload.
+  let statuslineCache: { until: number; payload: unknown } | null = null;
+
   /**
    * D13 (R2) — thin statusline endpoint. One-line compact JSON for
    * shell-prompt / status-bar integrations that don't want to pull the
    * full snapshot. Always 200 with safe defaults so callers can pipe to
    * `jq` without branching.
+   *
+   * R4.5 B18 — `?cache=N` server-side caches response for N seconds.
+   * R4.5 B19 — `?refresh=N` adds `Cache-Control: max-age=N` hint for
+   * consumers; doesn't change server behaviour beyond the header.
    */
-  r.get("/statusline", (_req, res) => {
+  r.get("/statusline", (req, res) => {
+    // R4.5 B19: refresh-interval hint via Cache-Control (does not affect
+    // server-side cache; just signals to the consumer how often to poll).
+    const refreshRaw = typeof req.query.refresh === "string" ? Number(req.query.refresh) : NaN;
+    if (Number.isFinite(refreshRaw) && refreshRaw > 0) {
+      res.setHeader("Cache-Control", `max-age=${Math.floor(refreshRaw)}`);
+    }
+    // R4.5 B18: server-side cache hit.
+    const cacheRaw = typeof req.query.cache === "string" ? Number(req.query.cache) : NaN;
+    const cacheSeconds = (Number.isFinite(cacheRaw) && cacheRaw > 0) ? Math.floor(cacheRaw) : 0;
+    const nowMs = Date.now();
+    if (cacheSeconds > 0 && statuslineCache && nowMs < statuslineCache.until) {
+      res.json(statuslineCache.payload);
+      return;
+    }
+
     const snap = deps.store.get();
+    let payload: unknown;
     if (!snap) {
-      res.json({
+      payload = {
         ready: false,
         today: { cost: 0, tokens: 0 },
         activeBlock: null,
         generatedAt: null,
-      });
-      return;
+      };
+    } else {
+      const active = snap.derived.activeBlock;
+      payload = {
+        ready: true,
+        today: snap.derived.today,
+        activeBlock: active
+          ? {
+            id: active.id,
+            startTime: active.startTime,
+            endTime: active.endTime,
+            costUSD: active.costUSD,
+            pctOfProjection: active.projection && active.projection.totalCost > 0
+              ? Math.min(100, Math.round((active.costUSD / active.projection.totalCost) * 100))
+              : null,
+            isActive: active.isActive,
+          }
+          : null,
+        driver: snap.derived.todayDrivers?.agent ?? null,
+        generatedAt: snap.generatedAt,
+        ccusageVersion: snap.ccusageVersion,
+      };
     }
-    const active = snap.derived.activeBlock;
-    res.json({
-      ready: true,
-      today: snap.derived.today,
-      activeBlock: active
-        ? {
-          id: active.id,
-          startTime: active.startTime,
-          endTime: active.endTime,
-          costUSD: active.costUSD,
-          pctOfProjection: active.projection && active.projection.totalCost > 0
-            ? Math.min(100, Math.round((active.costUSD / active.projection.totalCost) * 100))
-            : null,
-          isActive: active.isActive,
-        }
-        : null,
-      driver: snap.derived.todayDrivers?.agent ?? null,
-      generatedAt: snap.generatedAt,
-      ccusageVersion: snap.ccusageVersion,
-    });
+    if (cacheSeconds > 0) {
+      statuslineCache = { until: nowMs + cacheSeconds * 1000, payload };
+    }
+    res.json(payload);
   });
 
   /**

@@ -46,6 +46,77 @@ explicit rationale + lead escalation reference. No exceptions.
 
 <!-- Implementer appends one entry per commit. -->
 
+## R4.5 (server-side portion) · B12 + B16 + B18 + B19 flag passthroughs
+
+**PRD v4 §1 reference:** R4.5 (B12 / B16 / B18 / B19; B14 + B15 are web-only and ship in the bulk web batch)
+**Parity row(s) closed:** B12 0 → 0.5 (debug endpoint exists; UI link in web batch promotes to 1.0); B16 0 → 1.0 (full server-side); B18 0 → 1.0 (cache); B19 0 → 1.0 (refresh-hint)
+**Effort estimate (PRD):** ~3 h for the server-side subset
+**Effort actual:** ~45 min (compact scope; existing endpoint extensions + config-loader keys)
+**Commit SHA(s):** (this commit)
+**Files touched:**
+  - `server/src/insights/config-loader.ts` — `Config` interface extended with `sessionLengthHours` (R4.5 B16) and `recentBlocks` (R4.5 B15 — server publishes, web reads). Validation block extended (positive-number guard, same shape as `tokenLimit`).
+  - `docs/config-schema.json` — mirror schema entries with descriptions.
+  - `server/src/native/runner.ts` — `NativeRunnerOptions.sessionLengthHours` added; `buildBlocks` + `toRealBlock` accept `sessionMs` parameter (default unchanged `BLOCK_MS`); cluster algorithm uses the passed value.
+  - `server/src/app.ts` — `ccusageExtraArgs` push `--session-length <N>` when configured; native runner receives `sessionLengthHours` via opts.
+  - `server/src/routes.ts` — new `GET /api/debug` (B12: returns generatedAt + health + snapshot recordCounts/derived hints + config + pricing marker); `/api/statusline` extended with `?cache=N` (server-side TTL cache) and `?refresh=N` (`Cache-Control: max-age=N` hint).
+**AC tests landed:**
+  - `server/src/native/__tests__/blocks-cluster.test.ts` ::: "R4.5 B16: sessionLengthHours=2 makes a 3h gap split a cluster (vs default 5h would not)"
+  - `server/src/native/__tests__/blocks-cluster.test.ts` ::: "R4.5 B16: sessionLengthHours=0 or negative falls back to default 5h"
+  - `server/src/__tests__/routes.test.ts` ::: "?cache=N serves the same payload to repeat requests within N seconds"
+  - `server/src/__tests__/routes.test.ts` ::: "no ?cache= → no server-side caching (each request reads fresh)"
+  - `server/src/__tests__/routes.test.ts` ::: "?refresh=N sets Cache-Control: max-age=<N>"
+  - `server/src/__tests__/routes.test.ts` ::: "no ?refresh= → no Cache-Control header is set by the route"
+  - `server/src/__tests__/routes.test.ts` ::: GET /api/debug · 3 tests (empty store, populated, with config)
+**Surface grep proof:**
+  - `grep -n "sessionLengthHours\|sessionMs" server/src/native/runner.ts` → 5 hits (interface field, opts plumb, buildBlocks/toRealBlock parameter, cluster threshold)
+  - `grep -n "statuslineCache\|/api/debug\|cache=N\|refresh=N" server/src/routes.ts` → 4+ surface hits
+**Smoke / e2e proof:** smoke-gate unaffected (block algorithm change is back-compat: default sessionMs preserved); 312/312 server tests green.
+**Reviewer recount expectation:** +3.0 pp on B12/B16/B18/B19 (server-side) + 0.5 pp pending (B12 web link in web batch promotes from 0.5 to 1.0).
+**Status:** committed — server-side flag passthroughs complete; B12 web link + B14 `id:` SessionTable prefix + B15 BlocksPanel Recent/All tabs scheduled for the web R4 batch (after R4.4 swap).
+
+## R4.8 · Native `--mode display` / `--mode auto` polish — ALREADY SHIPPED in R3
+
+**PRD v4 §1 reference:** R4.8
+**Parity row(s) closed:** none direct (A13/A14/A15 already 1.0); unlocked R4.0.c apples-to-apples smoke gate.
+**Effort estimate (PRD):** S (~3 h)
+**Effort actual:** ~5 min verification — R4.8 work already shipped in R3 §D batch (`03ec63a` series).
+**Commit SHA(s):** pre-R4 (R3 §D.5 / S-R2-2 closure batch); R4 itself touches no new code on this item.
+**Files touched (pre-R4):**
+  - `server/src/native/loader.ts:48-60` — `applyCostMode(e, mode)` already handles all 3 modes (`calculate` short-circuit, `display` trust-raw-or-zero, `auto` prefer-raw-fallback-recompute) per the JSDoc at line 22-37.
+  - `server/src/native/__tests__/cost-mode.test.ts` — 10 unit tests covering AC4's 9-case matrix (3 modes × {costUSD present, null, absent}) + the bonus apples-to-apples cross-check.
+**AC tests landed (pre-R4):**
+  - `cost-mode.test.ts` ::: "`calculate` (default) always recomputes — ignores rawCostUSD"
+  - `cost-mode.test.ts` ::: "`display` always uses rawCostUSD — bypasses recompute"
+  - `cost-mode.test.ts` ::: "`display` treats null rawCostUSD as 0"
+  - `cost-mode.test.ts` ::: "`display` treats absent rawCostUSD as 0"
+  - `cost-mode.test.ts` ::: "`auto` prefers raw when finite"
+  - `cost-mode.test.ts` ::: "`auto` falls back to recompute when raw is null"
+  - `cost-mode.test.ts` ::: "`auto` falls back to recompute when raw is absent"
+  - `cost-mode.test.ts` ::: "apples-to-apples: `calculate` and `auto-with-no-rawCostUSD` agree (R3 §D.2 closure)"
+  - `cost-mode.test.ts` ::: "modes never mutate rawCostUSD (preserved verbatim on the cooked entry)"
+**Surface grep proof:**
+  - `grep -n "applyCostMode" server/src/native/loader.ts` → 3 hits (definition + 2 call sites in loadJsonlContent + loadJsonlFiles)
+**Smoke / e2e proof:**
+  - R4.0.c smoke harness (now 6/6 PASS) implicitly validates the `calculate` mode path on real data — that's what AC5 ("smoke band tightening folded into R4.0.c") asked for.
+**Reviewer recount expectation:** 0 pp (no new parity uplift; correctness portion of A13/A14/A15 already 1.0).
+**Status:** committed (pre-R4 in R3 §D batch); R4 verification confirms the implementation matches the R4.8.AC1-AC5 spec. PRD R4.8 is effectively a verification-only item this round — no new code, no smoke contract regression.
+
+## R4.7 · A12 upstream wire-through trip (conditional, NOT FIRED in R4)
+
+**PRD v4 §1 reference:** R4.7
+**Parity row(s) closed:** A12 0.5 → 1.0 ONLY IF upstream lands `usage_limit_reset_time` before R4 review; otherwise stays 0.5.
+**Effort estimate (PRD):** XS (~1 h conditional)
+**Effort actual:** 5 min (probe + slip-plan)
+**Commit SHA(s):** none (no code lands when conditional doesn't fire)
+**Files touched:** none (R3.13 watch-CI workflow already in place at `.github/workflows/upstream-limit-reset-watch.yml` from R3.1's `84f25ef`)
+**AC tests landed:** R3.13 unit + integration tests already cover the wire-through path; no new tests needed.
+**Probe results (R4 implementer trip):**
+  - `curl -sSfL https://ccusage.com/guide/blocks-reports | grep usage_limit_reset_time` → 0 hits
+  - `ccusage claude blocks --json` schema inspection → field not yet emitted
+**Disposition:** Per PRD R4.7.AC5: "If upstream hasn't landed by R4 review, closure-trace marks R4.7 as `partial (slip-plan slot opened)` with a forward-reference to upstream auto-PR. No silent drop."
+**Reviewer recount expectation:** 0 pp (A12 stays 0.5; R5 absorbs whenever the watch-CI fires the auto-PR).
+**Status:** **partial** — wire-through code already in place from R3.13; auto-fire mechanism is the weekly `upstream-limit-reset-watch.yml` workflow. R5 absorbs the +0.5 pp when upstream lands. Slip-plan slot opened at `r4-slip-plan.md#r4-7-conditional-not-fired`.
+
 ## R4.10 · Pricing snapshot refresh — Opus 4.x post-Nov rate reduction
 
 **PRD v4 §1 reference:** R4.10

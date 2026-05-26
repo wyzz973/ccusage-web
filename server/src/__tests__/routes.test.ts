@@ -260,5 +260,97 @@ describe("routes", () => {
       expect(res.body.generatedAt).toBe("2026-05-24T10:00:00Z");
       expect(res.body.ccusageVersion).toBe("1.0.0");
     });
+
+    // R4.5 B18: ?cache=N — server-side cache window.
+    it("?cache=N serves the same payload to repeat requests within N seconds", async () => {
+      const { app, store } = makeApp({ populated: true });
+      const res1 = await request(app).get("/api/statusline?cache=5");
+      const t1 = res1.body.generatedAt;
+      // Mutate the store; without the cache, the next call would see the new value.
+      store.set({
+        generatedAt: "2026-05-25T11:11:11Z",
+        ccusageVersion: "2.0.0",
+        daily: { records: [] }, weekly: { records: [] }, monthly: { records: [] },
+        session: { records: [] }, blocks: { records: [] },
+        derived: {
+          today:{tokens:0,cost:0}, week:{tokens:0,cost:0}, month:{tokens:0,cost:0}, allTime:{tokens:0,cost:0},
+          activeBlock: null, activeSessionCount: 0,
+        },
+      });
+      const res2 = await request(app).get("/api/statusline?cache=5");
+      expect(res2.body.generatedAt).toBe(t1); // served from cache
+    });
+
+    it("no ?cache= → no server-side caching (each request reads fresh)", async () => {
+      const { app, store } = makeApp({ populated: true });
+      const res1 = await request(app).get("/api/statusline");
+      store.set({
+        generatedAt: "2026-05-25T11:11:11Z",
+        ccusageVersion: "2.0.0",
+        daily: { records: [] }, weekly: { records: [] }, monthly: { records: [] },
+        session: { records: [] }, blocks: { records: [] },
+        derived: {
+          today:{tokens:0,cost:0}, week:{tokens:0,cost:0}, month:{tokens:0,cost:0}, allTime:{tokens:0,cost:0},
+          activeBlock: null, activeSessionCount: 0,
+        },
+      });
+      const res2 = await request(app).get("/api/statusline");
+      expect(res2.body.generatedAt).not.toBe(res1.body.generatedAt);
+    });
+
+    // R4.5 B19: ?refresh=N — Cache-Control hint.
+    it("?refresh=N sets Cache-Control: max-age=<N>", async () => {
+      const { app } = makeApp({ populated: true });
+      const res = await request(app).get("/api/statusline?refresh=15");
+      expect(res.headers["cache-control"]).toBe("max-age=15");
+    });
+
+    it("no ?refresh= → no Cache-Control header is set by the route", async () => {
+      const { app } = makeApp({ populated: true });
+      const res = await request(app).get("/api/statusline");
+      // express may default-set cache-control; we assert the route didn't *override* it
+      // with our max-age. Check absence of an `max-age=` value matching our pattern.
+      const cc = res.headers["cache-control"] ?? "";
+      expect(cc).not.toMatch(/max-age=\d/);
+    });
+  });
+
+  // R4.5 B12 — /api/debug
+  describe("GET /api/debug (R4.5 B12)", () => {
+    it("returns generatedAt + health + null snapshot when store empty", async () => {
+      const { app } = makeApp({});
+      const res = await request(app).get("/api/debug");
+      expect(res.status).toBe(200);
+      expect(res.body.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(res.body.health.status).toBe("ok");
+      expect(res.body.snapshot).toBeNull();
+    });
+
+    it("returns recordCounts + derived hints when snapshot populated", async () => {
+      const { app } = makeApp({
+        populated: true,
+        detectedAgents: ["claude", "codex"],
+      });
+      const res = await request(app).get("/api/debug");
+      expect(res.status).toBe(200);
+      expect(res.body.snapshot.recordCounts).toEqual({
+        daily: 0, weekly: 0, monthly: 0, session: 0, blocks: 0,
+      });
+      expect(res.body.snapshot.derived.detectedAgents).toEqual(["claude", "codex"]);
+      expect(res.body.snapshot.ccusageVersion).toBe("1.0.0");
+      expect(res.body.pricing.snapshotMarker).toMatch(/R4\.10/);
+    });
+
+    it("returns config when supplied (mergedFrom + active)", async () => {
+      const { app } = makeApp({
+        populated: true,
+        config: { mergedFrom: ["/srv/cfg.json"], config: { sessionLengthHours: 8 } },
+      });
+      const res = await request(app).get("/api/debug");
+      expect(res.body.config).toEqual({
+        mergedFrom: ["/srv/cfg.json"],
+        active: { sessionLengthHours: 8 },
+      });
+    });
   });
 });

@@ -54,6 +54,16 @@ criterion-1 trigger.
 
 ## R4 in-round deferrals (added as items slip)
 
+### `#r4-7-conditional-not-fired`
+**Slipped from:** R4.7 (conditional on upstream `usage_limit_reset_time` exposure)
+**PRD v4 reference:** §1 R4.7
+**Probe results at R4 implementer-trip (2026-05-26):**
+  - `curl https://ccusage.com/guide/blocks-reports` → 0 hits for `usage_limit_reset_time`
+  - `ccusage claude blocks --json` schema → field absent
+**R4 disposition:** No code lands. Wire-through path is already in place from R3.13 (`84f25ef` shipped the native parser + buildBlocks stamping + `limit-reset.ts` consumer reading the field). Watch-CI workflow `.github/workflows/upstream-limit-reset-watch.yml` runs Mondays 06:30 UTC + on workflow_dispatch — auto-PR fires when the field surfaces upstream.
+**R5 disposition:** Auto-absorbed by the watch-CI mechanism. When `usage_limit_reset_time` lands in ccusage 20.x and the auto-PR merges, A12 promotes 0.5 → 1.0 (+0.5 pp) with zero new code.
+**Status:** explicit no-fire on R4 implementer-trip; cited in closure-trace R4.7 entry as `partial`.
+
 ### `#multi-agent-discovery`
 **Slipped from:** R4.0 (S-R2-2 smoke gate convergence)
 **PRD v4 reference:** §1 R4.0 (prerequisite Phase 0) — gate-5 condition

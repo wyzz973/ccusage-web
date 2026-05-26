@@ -50,10 +50,18 @@ export interface NativeRunnerOptions {
    * passing `--mode calculate` to the binary too.
    */
   mode?: import("./loader.js").Mode;
+  /**
+   * R4.5 B16: billing-block window in hours. Defaults to 5 per
+   * iter0-R1 §5. Passed to `buildBlocks` so the cluster-and-gap
+   * algorithm uses the configured session length instead of the
+   * hard-coded 5h.
+   */
+  sessionLengthHours?: number;
 }
 
 const BLOCK_HOURS = 5;
 const BLOCK_MS = BLOCK_HOURS * 60 * 60 * 1000;
+const MS_PER_HOUR = 60 * 60 * 1000;
 
 /** ccusage-runner-compatible facade. */
 export async function runNative<T = unknown>(
@@ -89,10 +97,16 @@ export async function runNative<T = unknown>(
       return { monthly: bucketByMonth(perFile, tz) } as T;
     case "session":
       return { session: bucketBySession(perFile) } as T;
-    case "blocks":
+    case "blocks": {
       // R4.0.a (Researcher v4 §B.1) — `tz` is now threaded so blocks
       // floor to user-local hour (matches ccusage's `identify_session_blocks`).
-      return { blocks: buildBlocks(perFile, now, tz) } as T;
+      // R4.5 B16 — `sessionLengthHours` overrides the default 5h window;
+      // honors ccusage's `--session-length` flag semantics.
+      const sessionMs = (opts.sessionLengthHours != null && opts.sessionLengthHours > 0)
+        ? opts.sessionLengthHours * MS_PER_HOUR
+        : BLOCK_MS;
+      return { blocks: buildBlocks(perFile, now, tz, sessionMs) } as T;
+    }
     default:
       throw new Error(`runNative: unsupported command "${cmd}"`);
   }
@@ -306,17 +320,20 @@ function bucketBySession(perFile: FileBundle[]): UsageRecord[] {
  *   - R3.13 `usageLimitResetTime` propagation (latest-non-null wins)
  *   - Burn-rate / projection only on the active block
  */
-function buildBlocks(perFile: FileBundle[], now: Date, tz: string): Block[] {
+function buildBlocks(perFile: FileBundle[], now: Date, tz: string, sessionMs: number = BLOCK_MS): Block[] {
   const all: CookedEntry[] = [];
   for (const fb of perFile) all.push(...fb.result.entries);
   if (all.length === 0) return [];
   all.sort((a, b) => a.timestampMs - b.timestampMs);
 
   // Cluster the entries: each cluster starts at `floor_to_hour(entry.t)`
-  // in user-local TZ. A new cluster begins when an entry is > BLOCK_MS
+  // in user-local TZ. A new cluster begins when an entry is > sessionMs
   // from EITHER the cluster start OR the previous entry. Gap blocks
   // are inserted between two real clusters when the last-entry-to-next
-  // -entry gap is > BLOCK_MS.
+  // -entry gap is > sessionMs.
+  // R4.5 B16 — sessionMs is parameterized; defaults to BLOCK_MS (5h)
+  // for back-compat. `--session-length N` (or config `sessionLengthHours`)
+  // overrides.
   interface Cluster { start: number; entries: CookedEntry[] }
   const clusters: Cluster[] = [];
   const gapStarts: number[] = []; // index in `clusters` array AFTER which a gap was triggered
@@ -328,8 +345,8 @@ function buildBlocks(perFile: FileBundle[], now: Date, tz: string): Block[] {
       continue;
     }
     const lastT = cur.entries[cur.entries.length - 1]!.timestampMs;
-    const exceedsStart = (e.timestampMs - cur.start) > BLOCK_MS;
-    const exceedsLast  = (e.timestampMs - lastT)    > BLOCK_MS;
+    const exceedsStart = (e.timestampMs - cur.start) > sessionMs;
+    const exceedsLast  = (e.timestampMs - lastT)    > sessionMs;
     if (exceedsStart || exceedsLast) {
       clusters.push(cur);
       if (exceedsLast) gapStarts.push(clusters.length - 1);
@@ -347,17 +364,17 @@ function buildBlocks(perFile: FileBundle[], now: Date, tz: string): Block[] {
   const gapSet = new Set(gapStarts);
   for (let i = 0; i < clusters.length; i++) {
     const c = clusters[i]!;
-    blocks.push(toRealBlock(c, now));
+    blocks.push(toRealBlock(c, now, sessionMs));
     if (gapSet.has(i) && i + 1 < clusters.length) {
       const lastT  = c.entries[c.entries.length - 1]!.timestampMs;
       const nextT0 = clusters[i + 1]!.entries[0]!.timestampMs;
-      blocks.push(toGapBlock(lastT + BLOCK_MS, nextT0));
+      blocks.push(toGapBlock(lastT + sessionMs, nextT0));
     }
   }
   return blocks;
 }
 
-function toRealBlock(c: { start: number; entries: CookedEntry[] }, now: Date): Block {
+function toRealBlock(c: { start: number; entries: CookedEntry[] }, now: Date, sessionMs: number = BLOCK_MS): Block {
   const inWindow = c.entries;
   const totals = inWindow.reduce((acc, e) => ({
     cost: acc.cost + e.costUSD,
@@ -368,12 +385,12 @@ function toRealBlock(c: { start: number; entries: CookedEntry[] }, now: Date): B
     cr: acc.cr + e.cacheReadInputTokens,
   }), { cost: 0, tokens: 0, input: 0, output: 0, cc: 0, cr: 0 });
   const start = c.start;
-  const end = start + BLOCK_MS;
+  const end = start + sessionMs;
   const lastActivity = inWindow[inWindow.length - 1]!.timestampMs;
   // R4.0.a — `is_active`: now within the block window AND last entry
-  // less than BLOCK_MS ago. Matches ccusage's `blocks.rs:90-95`.
+  // less than `sessionMs` ago. Matches ccusage's `blocks.rs:90-95`.
   const isActive = now.getTime() >= start && now.getTime() < end
-    && (now.getTime() - lastActivity) < BLOCK_MS;
+    && (now.getTime() - lastActivity) < sessionMs;
   const models = Array.from(new Set(inWindow.map((e) => e.displayModel).filter((m): m is string => !!m)));
   // R3.13 — latest non-null `usageLimitResetTime` wins.
   let usageLimitResetTime: string | null = null;

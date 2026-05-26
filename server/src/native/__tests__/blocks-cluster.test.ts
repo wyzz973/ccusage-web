@@ -180,4 +180,45 @@ describe("buildBlocks · R4.0.a cluster-and-gap algorithm (researcher v4 §B.1)"
     });
     expect(out.blocks).toHaveLength(0);
   });
+
+  // R4.5 B16 — `sessionLengthHours` parameterises the cluster threshold.
+  it("R4.5 B16: sessionLengthHours=2 makes a 3h gap split a cluster (vs default 5h would not)", async () => {
+    const contents = [
+      // 4 entries spread across 4h; with default 5h → 1 cluster, with 2h → splits.
+      lineAt("2026-05-25T08:00:00Z", "r1"),
+      lineAt("2026-05-25T09:30:00Z", "r2"),
+      lineAt("2026-05-25T11:00:00Z", "r3"),  // 1.5h from prev — fits in 2h window
+      lineAt("2026-05-25T12:00:00Z", "r4"),
+    ].join("\n");
+    const opts = {
+      files: [PROJECT_FILE],
+      tz: "UTC",
+      now: new Date("2026-05-25T18:00:00Z"),
+      fs: { readFileSync: (p: string) => p === PROJECT_FILE ? contents : "" },
+    };
+    // Default 5h: all 4 entries cluster together → 1 real block
+    const defaultRun = await runNative<BlocksOut>("blocks", opts);
+    expect(defaultRun.blocks.filter((b) => !b.isGap)).toHaveLength(1);
+    // sessionLengthHours=2: cluster-start violation fires (08:00 → 11:00 = 3h > 2h)
+    // → splits at entry 3.
+    const shortRun = await runNative<BlocksOut>("blocks", { ...opts, sessionLengthHours: 2 });
+    const realBlocks = shortRun.blocks.filter((b) => !b.isGap);
+    expect(realBlocks.length).toBeGreaterThan(1);
+  });
+
+  it("R4.5 B16: sessionLengthHours=0 or negative falls back to default 5h", async () => {
+    const contents = [
+      lineAt("2026-05-25T08:00:00Z", "r1"),
+      lineAt("2026-05-25T12:00:00Z", "r2"), // 4h gap, still within 5h
+    ].join("\n");
+    const baseOpts = {
+      files: [PROJECT_FILE],
+      tz: "UTC",
+      now: new Date("2026-05-25T18:00:00Z"),
+      fs: { readFileSync: (p: string) => p === PROJECT_FILE ? contents : "" },
+    };
+    // sessionLengthHours: 0 should be ignored (fallback to default 5h)
+    const out = await runNative<BlocksOut>("blocks", { ...baseOpts, sessionLengthHours: 0 });
+    expect(out.blocks.filter((b) => !b.isGap)).toHaveLength(1);
+  });
 });

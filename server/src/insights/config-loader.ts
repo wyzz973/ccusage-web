@@ -41,6 +41,21 @@ export interface Config {
   costMode?: "calculate" | "auto" | "display";
   /** Optional timezone override (IANA). */
   timezone?: string;
+  /**
+   * R4.5 B16: `--session-length` — billing-block window in hours.
+   * Defaults to 5 per iter0-R1 §5. Honored both by native `buildBlocks`
+   * (sessionLengthMs derive) AND ccusage shellout (`--session-length N`
+   * extraArg). Positive number; non-positive falls back to default with
+   * `console.warn` per validation block in `readOneConfig`.
+   */
+  sessionLengthHours?: number;
+  /**
+   * R4.5 B15: `recentBlocks` — how many trailing blocks the
+   * BlocksPanel `Recent` tab surfaces (default 8 per spec-v3.1).
+   * Pure UI; passed through `/api/health.config` for the client to
+   * read.
+   */
+  recentBlocks?: number;
 }
 
 export interface LoadedConfig {
@@ -138,7 +153,9 @@ function readOneConfig(
     switch (k) {
       case "tokenLimit":
       case "monthlyCapUSD":
-      case "perBlockTokenLimit": {
+      case "perBlockTokenLimit":
+      case "sessionLengthHours":
+      case "recentBlocks": {
         if (typeof v === "number" && Number.isFinite(v) && v > 0) {
           (out as Record<string, unknown>)[k] = v;
         } else {

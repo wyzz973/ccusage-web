@@ -44,6 +44,16 @@
       "type": "string",
       "minLength": 1,
       "description": "IANA timezone for date-bucket keys + display rollover. Defaults to the host's resolved timezone."
+    },
+    "sessionLengthHours": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "R4.5 B16: billing-block window in hours (default 5 per iter0-R1 §5). Drives native buildBlocks AND the ccusage --session-length flag."
+    },
+    "recentBlocks": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "R4.5 B15: how many trailing blocks the BlocksPanel Recent tab surfaces (default 8)."
     }
   }
 }
