@@ -249,3 +249,47 @@ describe("daily/weekly/monthly aren't broken by project stamping (regression gua
     expect(blocksOut.blocks.length).toBeGreaterThan(0);
   });
 });
+
+// R3 §D.4.3 cross-file dedup audit: passing the same file twice in the
+// input array (overlapping CLAUDE_CONFIG_DIR roots, accidental test
+// duplication, …) must not double-count. The keyed-dedup path inside
+// `dedupEntries` catches the common case (entries with both messageId
+// AND requestId), but unkeyed entries would slip through and land in
+// the `unkeyed` pass-through without the runner-level input dedup.
+describe("R3 §D.4.3 — runNative dedups duplicate input files", () => {
+  it("totals are identical whether a file appears once or twice in `files`", async () => {
+    const tree = mockClaudeProjectsTree({
+      "/u/.claude/projects": {
+        "-Users-sd3-code-ccusage-web":  ["sess-aaa"],
+        "-Users-sd3-code-react-router": ["sess-bbb"],
+      },
+    });
+    const once = await runNative<{ daily: UsageRecord[] }>("daily", {
+      files: tree.files, fs: tree.fs,
+      now: new Date("2026-05-25T11:00:00Z"), tz: "UTC",
+    });
+    const twice = await runNative<{ daily: UsageRecord[] }>("daily", {
+      files: [...tree.files, ...tree.files],     // each file listed twice
+      fs: tree.fs,
+      now: new Date("2026-05-25T11:00:00Z"), tz: "UTC",
+    });
+    const onceTotal = once.daily.reduce((s, r) => s + r.totalCost, 0);
+    const twiceTotal = twice.daily.reduce((s, r) => s + r.totalCost, 0);
+    expect(twiceTotal).toBe(onceTotal);
+    expect(twice.daily.length).toBe(once.daily.length);
+  });
+
+  it("session bucket: file listed twice still produces exactly one record per file", async () => {
+    const tree = mockClaudeProjectsTree({
+      "/u/.claude/projects": {
+        "-Users-sd3-code-ccusage-web": ["sess-aaa", "sess-bbb"],
+      },
+    });
+    const out = await runNative<{ session: UsageRecord[] }>("session", {
+      files: [...tree.files, tree.files[0]!, tree.files[1]!],
+      fs: tree.fs,
+      now: new Date("2026-05-25T11:00:00Z"), tz: "UTC",
+    });
+    expect(out.session).toHaveLength(2); // NOT 4
+  });
+});

@@ -122,12 +122,30 @@ export function loadJsonlContent(content: string, opts: LoadOptions & { filePath
  * R2.2 (M-R2-1): every emitted entry carries `filePath` so the runner can
  * stamp `UsageRecord.project` per session via `decodeProject(filePath)`.
  * R3 (S-R2-2): respects `opts.mode` for cost resolution.
+ *
+ * R3 (§D.4.3 — cross-file dedup audit): the input `files` array is
+ * deduped at the top so processing the same file twice (e.g. when
+ * overlapping `CLAUDE_CONFIG_DIR` roots discover the same path, or when
+ * a test passes a duplicate by accident) doesn't double-count entries
+ * that are missing either `messageId` OR `requestId` (those would
+ * otherwise land in `dedupEntries`'s `unkeyed` pass-through). The
+ * keyed-dedup path catches normal overlap; the input-dedup catches the
+ * same-file-twice edge case at the boundary.
  */
 export function loadJsonlFiles(files: string[], opts: LoadOptions = {}): LoaderResult {
   const pricing = opts.pricing ?? createPricing();
   const mode: Mode = opts.mode ?? "calculate";
+  // R3 §D.4.3 defensive dedup at the file level. Preserves input order
+  // for the first occurrence (deterministic across runs).
+  const seen = new Set<string>();
+  const uniqueFiles: string[] = [];
+  for (const f of files) {
+    if (seen.has(f)) continue;
+    seen.add(f);
+    uniqueFiles.push(f);
+  }
   const cooked: CookedEntry[] = [];
-  for (const file of files) {
+  for (const file of uniqueFiles) {
     let content: string;
     try {
       content = fs.readFileSync(file, "utf8");

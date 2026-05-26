@@ -62,10 +62,21 @@ export async function runNative<T = unknown>(
 ): Promise<T> {
   const tz = opts.tz ?? "UTC";
   const now = opts.now ?? new Date();
-  const files = opts.files ?? discoverJsonlFiles();
+  const rawFiles = opts.files ?? discoverJsonlFiles();
   const pricing = opts.pricing ?? createPricing();
   const fsImpl = opts.fs ?? fs;
   const mode = opts.mode ?? "calculate";
+
+  // R3 §D.4.3 — dedup input file list. Overlapping CLAUDE_CONFIG_DIR
+  // roots and accidental test duplicates both surface here. Preserves
+  // first-occurrence order so output stays deterministic.
+  const seen = new Set<string>();
+  const files: string[] = [];
+  for (const f of rawFiles) {
+    if (seen.has(f)) continue;
+    seen.add(f);
+    files.push(f);
+  }
 
   const perFile = files.map((file) => loadFile(file, fsImpl, pricing, mode));
 
