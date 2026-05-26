@@ -63,7 +63,7 @@ const ZERO_TOTALS = (): LoaderTotals => ({
  * validated by `parseLine`; the resulting cooked entries are deduped
  * before aggregation.
  */
-export function loadJsonlContent(content: string, opts: LoadOptions = {}): LoaderResult {
+export function loadJsonlContent(content: string, opts: LoadOptions & { filePath?: string } = {}): LoaderResult {
   const pricing = opts.pricing ?? createPricing();
   const cooked: CookedEntry[] = [];
   // newlines: \r\n, \n, lone \r — keep behavior tolerant since fixtures
@@ -71,7 +71,7 @@ export function loadJsonlContent(content: string, opts: LoadOptions = {}): Loade
   const lines = content.split(/\r?\n|\r/);
   for (const line of lines) {
     if (!line || !line.trim()) continue;
-    const e = parseLine(line, pricing);
+    const e = parseLine(line, pricing, { filePath: opts.filePath });
     if (e) cooked.push(e);
   }
   const deduped = dedupEntries(cooked);
@@ -82,6 +82,9 @@ export function loadJsonlContent(content: string, opts: LoadOptions = {}): Loade
  * Read each file and concatenate the entries before deduping. Dedup runs
  * cross-file so that a duplicate (messageId, requestId) that landed in
  * two different .jsonls (e.g. a session that was reopened) is collapsed.
+ *
+ * R2.2 (M-R2-1): every emitted entry carries `filePath` so the runner can
+ * stamp `UsageRecord.project` per session via `decodeProject(filePath)`.
  */
 export function loadJsonlFiles(files: string[], opts: LoadOptions = {}): LoaderResult {
   const pricing = opts.pricing ?? createPricing();
@@ -96,7 +99,7 @@ export function loadJsonlFiles(files: string[], opts: LoadOptions = {}): LoaderR
     const lines = content.split(/\r?\n|\r/);
     for (const line of lines) {
       if (!line || !line.trim()) continue;
-      const e = parseLine(line, pricing);
+      const e = parseLine(line, pricing, { filePath: file });
       if (e) cooked.push(e);
     }
   }

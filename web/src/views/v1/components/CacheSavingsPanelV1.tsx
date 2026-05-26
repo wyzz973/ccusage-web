@@ -65,10 +65,30 @@ export function CacheSavingsPanelV1({ cache }: CacheSavingsPanelV1Props): JSX.El
                     hasWarning ? "text-amber-200" : "text-emerald-300",
                   )}
                   data-testid="cache-saved-usd"
+                  // S-R2-4 (R2.2): tooltip documents the formula so the optics
+                  // ("saved $ > spent $") don't read as a math error. Per-record:
+                  // cacheReadTokens × (input_rate − cache_read_rate). Cache read
+                  // is ~10× cheaper than input on Claude models (Sonnet 4: input
+                  // $3/M vs cache read $0.30/M), so saved comfortably exceeds
+                  // spent on cache-heavy workflows. The number is the
+                  // *hypothetical* "what you'd have paid without prompt caching"
+                  // minus what you actually paid.
+                  title={
+                    "Saved = Σ cacheReadTokens × (input_rate − cache_read_rate) per record. " +
+                    "Cache read is ~10× cheaper than input on Claude models, so saved $ " +
+                    "comfortably exceeds spent $ on cache-heavy workflows. It's the " +
+                    "hypothetical 'what you'd have paid without prompt caching' minus " +
+                    "what you actually paid — not double-counted against your spend."
+                  }
                 >
                   {formatCost(cache.savedUSD)}
                 </div>
-                <div className="text-xs text-muted-foreground mt-1">saved</div>
+                <div
+                  className="text-xs text-muted-foreground mt-1"
+                  data-testid="cache-saved-label"
+                >
+                  saved <span aria-hidden="true" title="hover the number for the formula">ⓘ</span>
+                </div>
               </div>
             </div>
             <div>

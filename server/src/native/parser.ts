@@ -78,6 +78,14 @@ export interface CookedEntry {
   totalTokens: number;
   speed?: string;
   costUSD: number;
+  /**
+   * R2.2 (M-R2-1): source file path, used by the runner to stamp
+   * `UsageRecord.project` via `decodeProject(filePath)`. Only set when
+   * the parser is fed a path (i.e. `loadJsonlFiles`); pure-content
+   * callers (`loadJsonlContent`) can pass `filePath` explicitly via the
+   * options if they want project attribution.
+   */
+  filePath?: string;
 }
 
 /** Returns true if line contains `:null` for any forbidden field name. */
@@ -93,8 +101,13 @@ export function hasUsageBlock(line: string): boolean {
   return line.indexOf('"usage":{') !== -1 || line.indexOf('"usage": {') !== -1;
 }
 
+export interface ParseLineOptions {
+  /** Optional source file path; stamped on the returned entry. */
+  filePath?: string;
+}
+
 /** Parse + validate one JSONL line. Returns the cooked entry, or null to skip. */
-export function parseLine(line: string, pricing: PricingFinder): CookedEntry | null {
+export function parseLine(line: string, pricing: PricingFinder, opts: ParseLineOptions = {}): CookedEntry | null {
   if (!hasUsageBlock(line)) return null;
   if (hasUnsupportedNullField(line)) return null;
 
@@ -166,6 +179,7 @@ export function parseLine(line: string, pricing: PricingFinder): CookedEntry | n
     totalTokens: input + output + cc + cr,
     speed: u.speed,
     costUSD,
+    filePath: opts.filePath,
   };
 }
 

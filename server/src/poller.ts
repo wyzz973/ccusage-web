@@ -1,4 +1,5 @@
 import pLimit from "p-limit";
+import * as path from "node:path";
 import type { Snapshot, UsageRecord, Block, Derived } from "./types.js";
 import type { SnapshotStore } from "./snapshot-store.js";
 import {
@@ -7,6 +8,7 @@ import {
   computeProjectRollups, computeCacheInsight, computeLimitResetInsight,
   decodeProject,
 } from "./insights/index.js";
+import { discoverJsonlFiles } from "./native/paths.js";
 
 export interface PollerDeps {
   store: SnapshotStore;
@@ -124,19 +126,30 @@ export function computeDerived(
 }
 
 /**
- * R2 S4 — stamp `record.project` on every session record so the insights
- * + UI layers don't have to re-derive from filename. Pure transform —
- * leaves records without an inferable project untouched (project stays
- * `undefined`, which the rollup treats as the absent state).
+ * R2 S4 / R2.2 M-R2-1 — stamp `record.project` on every session record so
+ * the insights + UI layers don't have to re-derive from filename.
+ *
+ * Sources, in order of preference:
+ *   1. Records that already carry `project` (the native runner pre-stamps
+ *      now — see `native/runner.ts.bucketBySession`).
+ *   2. The `sessionIdToProject` map (built by the caller from a discovered
+ *      `~/.claude/projects/**` walk) — keyed by `record.period` which holds
+ *      ccusage's session id. **This is what closes M-R2-1 for the ccusage
+ *      source**, which otherwise has no file-path signal in its `--json`.
+ *   3. `metadata.project` upstream hint (if a future ccusage version
+ *      surfaces one).
+ *   4. `undefined` (the rollup treats this as the absent state).
  */
-export function stampProjects(records: UsageRecord[]): UsageRecord[] {
+export function stampProjects(
+  records: UsageRecord[],
+  sessionIdToProject: Map<string, string> = new Map(),
+): UsageRecord[] {
   return records.map((r) => {
     if (r.project != null && r.project !== "") return r;
-    // ccusage session records put the sessionId in `period`; the
-    // discoverable project is usually in `metadata` (project hint) or
-    // derivable from the file path. The native runner already stamps via
-    // the file path; the ccusage shellout path lacks the file path so
-    // we fall back to `metadata.project` if upstream ever exposes it.
+    // (2) sessionId → canonical map built from a `~/.claude/projects/` walk.
+    const fromMap = sessionIdToProject.get(r.period);
+    if (fromMap) return { ...r, project: fromMap };
+    // (3) future-proof: optional `metadata.project` upstream hint.
     const meta = r.metadata as (Record<string, unknown> | undefined);
     const upstream = meta && typeof meta["project"] === "string" ? (meta["project"] as string) : null;
     if (upstream && upstream !== "") {
@@ -145,6 +158,32 @@ export function stampProjects(records: UsageRecord[]): UsageRecord[] {
     }
     return r;
   });
+}
+
+/**
+ * R2.2 — walk the on-disk projects tree and build a `<sessionId> →
+ * <canonical-project>` map. Called per-poll. Pluggable filesystem +
+ * discovery for tests. When the discovery yields no files (no
+ * `~/.claude/projects/` on the host), the map is empty and
+ * `stampProjects` no-ops gracefully.
+ */
+export interface ProjectMapDeps {
+  discover?: () => string[];
+}
+export function buildSessionProjectMap(deps: ProjectMapDeps = {}): Map<string, string> {
+  const discover = deps.discover ?? discoverJsonlFiles;
+  const out = new Map<string, string>();
+  let files: string[] = [];
+  try { files = discover(); } catch { /* discovery may throw on unusual fs configs */ }
+  for (const file of files) {
+    const sessionId = path.basename(file, ".jsonl");
+    if (!sessionId) continue;
+    const dec = decodeProject({ fullPath: file });
+    if (dec.canonical && dec.canonical !== "unknown") {
+      out.set(sessionId, dec.canonical);
+    }
+  }
+  return out;
 }
 
 export function createPoller(deps: PollerDeps): Poller {
@@ -162,14 +201,17 @@ export function createPoller(deps: PollerDeps): Poller {
       const results = await Promise.all(
         cmds.map((cmd) => limit(() => deps.runCcusage<Record<string, unknown[]>>(cmd))),
       );
+      // R2.2 (M-R2-1) — build the sessionId → canonical-project map from
+      // the on-disk projects tree once per poll, then thread it into
+      // stampProjects so both source modes (native + ccusage shellout)
+      // get project attribution.
+      const sessionProjectMap = buildSessionProjectMap();
+
       const buckets = {
         daily:   (results[0] as any)["daily"]   as UsageRecord[],
         weekly:  (results[1] as any)["weekly"]  as UsageRecord[],
         monthly: (results[2] as any)["monthly"] as UsageRecord[],
-        // R2 S4 — stamp `project` on session records so insights/UI don't
-        // have to re-derive. No-op when records already carry it (native
-        // runner pre-stamps).
-        session: stampProjects((results[3] as any)["session"] as UsageRecord[]),
+        session: stampProjects((results[3] as any)["session"] as UsageRecord[], sessionProjectMap),
         blocks:  (results[4] as any)["blocks"]  as Block[],
       };
       const version = await deps.getVersion().catch(() => "unknown");

@@ -25,7 +25,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { UsageRecord, Block, ModelBreakdown } from "../types.js";
 import {
-  getTodayKey, getWeekStartKey, getMonthKey,
+  getTodayKey, getWeekStartKey, getMonthKey, decodeProject,
 } from "../insights/index.js";
 import { discoverJsonlFiles } from "./paths.js";
 import { loadJsonlContent, type LoaderResult } from "./loader.js";
@@ -90,7 +90,10 @@ function loadFile(
 ): FileBundle {
   let text = "";
   try { text = fsImpl.readFileSync(file, "utf8"); } catch { /* unreadable */ }
-  const result = loadJsonlContent(text, { pricing });
+  // R2.2 (M-R2-1): pass `filePath` through so each cooked entry knows
+  // which file it came from, enabling per-session project stamping in
+  // `bucketBySession` below.
+  const result = loadJsonlContent(text, { pricing, filePath: file });
   return { file, agent: inferAgentFromPath(file), result };
 }
 
@@ -209,6 +212,12 @@ function bucketByMonth(perFile: FileBundle[], tz: string): UsageRecord[] {
 function bucketBySession(perFile: FileBundle[]): UsageRecord[] {
   // One UsageRecord per `<sessionId>.jsonl` file. period = sessionId-from-filename.
   // Agent is per-file (inferred from path root).
+  //
+  // R2.2 (M-R2-1): stamp `project` per session by decoding the encoded
+  // parent directory of the file path (`<root>/projects/<encoded>/<sid>.jsonl`).
+  // `decodeProject` returns the stable canonical id; the UI maps it to a
+  // short displayName at render time. Sessions in non-Claude roots (no
+  // `/projects/` segment in the path) end up with `project: undefined`.
   const out: UsageRecord[] = [];
   for (const fb of perFile) {
     if (fb.result.entries.length === 0) continue;
@@ -219,6 +228,8 @@ function bucketBySession(perFile: FileBundle[]): UsageRecord[] {
     for (const e of fb.result.entries) {
       if (e.timestampMs > lastActivityMs) lastActivityMs = e.timestampMs;
     }
+    const decoded = decodeProject({ fullPath: fb.file });
+    const project = decoded.canonical === "unknown" ? undefined : decoded.canonical;
     const record: UsageRecord = {
       period: sessionId,
       agent: fb.agent,
@@ -233,6 +244,7 @@ function bucketBySession(perFile: FileBundle[]): UsageRecord[] {
       metadata: lastActivityMs > 0
         ? { lastActivity: new Date(lastActivityMs).toISOString() }
         : {},
+      project,
     };
     out.push(record);
   }
