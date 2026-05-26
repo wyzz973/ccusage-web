@@ -39,6 +39,9 @@ function makeApp(opts: {
   perAgentBudgetMs?: number;
   config?: { mergedFrom: string[]; config: Record<string, unknown> };
   configSchemaPath?: string;
+  perAgentTask?: (agent: string, signal: AbortSignal) => Promise<{
+    totalCostUSD: number; totalTokens: number; sessionCount: number;
+  }>;
 }) {
   const store = createSnapshotStore();
   if (opts.populated) store.set(snap("2026-05-24T10:00:00Z", opts.sessionRecords ?? [], opts.detectedAgents ?? []));
@@ -52,6 +55,7 @@ function makeApp(opts: {
     perAgentBudgetMs: opts.perAgentBudgetMs,
     config: opts.config as never,
     configSchemaPath: opts.configSchemaPath,
+    perAgentTask: opts.perAgentTask,
   }));
   return { app, store, hub };
 }
@@ -197,16 +201,20 @@ describe("routes", () => {
       expect(res.body.budgetMs).toBe(800); // spec-v3 §1.4 default
     });
 
-    it("fans out per detected agent and aggregates today's sessions", async () => {
+    it("fans out per detected agent — `perAgentTask` injection preserves R3 semantics", async () => {
+      // R4.4 — production task body now does a real `ccusage <agent>
+      // session --json --mode calculate --since/--until <YYYYMMDD>`
+      // shellout, so this test injects a stub to verify the race
+      // wrapper + envelope shape stay R3-stable.
+      const stubTask = vi.fn(async (agent: string, _signal: AbortSignal) => ({
+        totalCostUSD: agent === "claude" ? 4.0 : 3.0,
+        totalTokens:  agent === "claude" ? 300 : 300,
+        sessionCount: agent === "claude" ? 2 : 1,
+      }));
       const { app } = makeApp({
         populated: true,
-        sessionRecords: [
-          sess("2026-05-25T10:00:00Z", 1.5, "claude", 100),
-          sess("2026-05-25T11:00:00Z", 2.5, "claude", 200),
-          sess("2026-05-25T12:00:00Z", 3.0, "codex",  300),
-          sess("2026-05-24T10:00:00Z", 99,  "claude", 999), // wrong day → excluded
-        ],
         detectedAgents: ["claude", "codex"],
+        perAgentTask: stubTask,
       });
       const res = await request(app).get("/api/per-agent?date=2026-05-25&tz=UTC");
       expect(res.status).toBe(200);
@@ -216,6 +224,41 @@ describe("routes", () => {
       const codex  = res.body.succeeded.find((s: { agent: string }) => s.agent === "codex");
       expect(claude.data).toEqual({ totalCostUSD: 4.0, totalTokens: 300, sessionCount: 2 });
       expect(codex.data).toEqual({ totalCostUSD: 3.0, totalTokens: 300, sessionCount: 1 });
+      expect(stubTask).toHaveBeenCalledTimes(2);
+      expect(stubTask).toHaveBeenCalledWith("claude", expect.anything());
+      expect(stubTask).toHaveBeenCalledWith("codex", expect.anything());
+    });
+
+    it("R4.4: passes a real AbortSignal to the task (race wrapper contract)", async () => {
+      let signalReceived: AbortSignal | null = null;
+      const stubTask = async (_agent: string, signal: AbortSignal) => {
+        signalReceived = signal;
+        return { totalCostUSD: 0, totalTokens: 0, sessionCount: 0 };
+      };
+      const { app } = makeApp({
+        populated: true,
+        detectedAgents: ["claude"],
+        perAgentTask: stubTask,
+      });
+      await request(app).get("/api/per-agent?date=2026-05-25&tz=UTC");
+      expect(signalReceived).toBeInstanceOf(AbortSignal);
+    });
+
+    it("R4.4: thrown task error lands in `failed[]` (R3.6.AC5 silent-swallow preserved)", async () => {
+      const stubTask = async (agent: string, _s: AbortSignal) => {
+        if (agent === "codex") throw new Error("ccusage exit 2");
+        return { totalCostUSD: 1, totalTokens: 100, sessionCount: 1 };
+      };
+      const { app } = makeApp({
+        populated: true,
+        detectedAgents: ["claude", "codex"],
+        perAgentTask: stubTask,
+      });
+      const res = await request(app).get("/api/per-agent?date=2026-05-25&tz=UTC");
+      expect(res.body.status).toBe("partial");
+      expect(res.body.succeeded).toHaveLength(1);
+      expect(res.body.failed).toHaveLength(1);
+      expect(res.body.failed[0].agent).toBe("codex");
     });
 
     it("returns 400 for an invalid date shape", async () => {

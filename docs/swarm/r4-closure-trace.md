@@ -46,6 +46,31 @@ explicit rationale + lead escalation reference. No exceptions.
 
 <!-- Implementer appends one entry per commit. -->
 
+## R4.4 · R3.6 real per-agent shellout swap (server portion)
+
+**PRD v4 §1 reference:** R4.4
+**Parity row(s) closed:** A2.2 / A2.3 / A2.4 / A2.5 each 0.75 → 1.0 (combined with R3.5 chip-row); +1.0 pp net
+**Effort estimate (PRD):** M (~5 h)
+**Effort actual:** ~45 min (race wrapper untouched per AC1; only task body + injection scaffolding)
+**Commit SHA(s):** (this commit)
+**Files touched:**
+  - `server/src/ccusage-runner.ts` — new `runCcusageAgent(agent, cmd, opts)` per-source CLI helper. Builds `[agent, cmd, "--json", ...]` argv per the order ccusage 20.x requires (verified: `ccusage --json claude session` is rejected; `ccusage claude session --json` is accepted). Honors `signal` for AbortController cancellation.
+  - `server/src/routes.ts` — `RoutesDeps` extended with `perAgentTask` (test injection), `ccusageBin`, `perAgentTaskTimeoutMs` (defaults to `budgetMs + 200ms` slack). `/api/per-agent` route swaps the in-memory filter task for `defaultPerAgentTask` which calls `runCcusageAgent(agent, "session", { extraArgs: ["--mode", "calculate", "--since", YYYYMMDD, "--until", YYYYMMDD], signal })`. Race wrapper from R3 stays UNCHANGED (per AC5 the canary).
+  - `server/src/app.ts` — threads `cfg.ccusageBin` into `createRoutes` for the production default.
+  - `server/src/__tests__/routes.test.ts` — existing fan-out test refactored to inject `perAgentTask` stub (preserves R3 envelope assertion); new tests pin the AbortSignal contract + the R3.6.AC5 silent-swallow → `failed[]` classification.
+**AC tests landed:**
+  - `server/src/__tests__/routes.test.ts` ::: "fans out per detected agent — `perAgentTask` injection preserves R3 semantics" (AC1 surface verification)
+  - `server/src/__tests__/routes.test.ts` ::: "R4.4: passes a real AbortSignal to the task (race wrapper contract)" (AC2 signal forwarding)
+  - `server/src/__tests__/routes.test.ts` ::: "R4.4: thrown task error lands in `failed[]` (R3.6.AC5 silent-swallow preserved)" (AC4 failure-mode preservation)
+  - `server/src/insights/__tests__/per-agent.test.ts` ::: ALL 9 R3 canary tests still PASS (AC5 — "MUST still pass; if the naive Promise.race([allSettled, timeout]) pattern leaks back in, the canary fails red"; verified clean re-run post-swap)
+**Surface grep proof:**
+  - `grep -rn "runCcusageAgent.*session" server/src` → 2 hits (definition + route call site); per R4.4.AC6 "closure-trace row references this line".
+**Smoke / e2e proof:**
+  - `npm test --workspace=server`: 314/314 (+3 new R4.4 + helper coverage).
+  - `npm run test:e2e --workspace=web`: 3/3 PASS — including the R3.6 per-agent contract test (`per-agent-budget.spec.ts`) which mocks `/api/per-agent` and verifies the all-timeout footer surfaces. Race wrapper contract intact per AC2.
+**Reviewer recount expectation:** +1.0 pp on A2.2-A2.5 combined (each 0.75 → 1.0 per partial-credit-only-when-data-ships rule).
+**Status:** committed — server side complete; the per-agent chip row UI uplift (showing per-agent KPI numbers in the FilterChipRow) is in the web R4 batch.
+
 ## R4.5 (server-side portion) · B12 + B16 + B18 + B19 flag passthroughs
 
 **PRD v4 §1 reference:** R4.5 (B12 / B16 / B18 / B19; B14 + B15 are web-only and ship in the bulk web batch)

@@ -10,6 +10,7 @@ import {
 } from "./insights/index.js";
 import type { LoadedConfig } from "./insights/config-loader.js";
 import type { UsageRecord } from "./types.js";
+import { runCcusageAgent } from "./ccusage-runner.js";
 
 export interface RoutesDeps {
   store: SnapshotStore;
@@ -31,6 +32,20 @@ export interface RoutesDeps {
   config?: LoadedConfig;
   /** R3.12 — overridable schema path for tests. Defaults to `docs/config-schema.json`. */
   configSchemaPath?: string;
+  /**
+   * R4.4 — per-agent fan-out runner. Defaults to a real `ccusage
+   * <agent> session --json --mode calculate` shellout via
+   * `runCcusageAgent`. Tests inject a stub to avoid spawning the binary.
+   * The race wrapper (R3 `shellPerAgent`) is unchanged — only the task
+   * body swaps from in-memory filter to real shellout per AC1.
+   */
+  perAgentTask?: (agent: string, signal: AbortSignal) => Promise<{
+    totalCostUSD: number; totalTokens: number; sessionCount: number;
+  }>;
+  /** R4.4 — ccusage bin path for the default per-agent task. */
+  ccusageBin?: string;
+  /** R4.4 — per-agent shellout timeout (ms). Defaults to perAgentBudgetMs + 200ms slack. */
+  perAgentTaskTimeoutMs?: number;
 }
 
 const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -293,33 +308,66 @@ export function createRoutes(deps: RoutesDeps): Router {
       return;
     }
 
-    // Per-agent task: today's session records filtered to `agent`, summed.
-    // The signal isn't honored here because the work is sync-after-await;
-    // when this swaps to a real shellout in R4 the runner will honor it.
-    const todaysSessions = snap.session.records.filter((s: UsageRecord) => {
-      const t = s.metadata?.lastActivity;
-      if (!t) return false;
-      const ms = Date.parse(t);
-      if (!Number.isFinite(ms)) return false;
-      const dayKey = new Intl.DateTimeFormat("en-CA", {
-        timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
-      }).format(new Date(ms));
-      return dayKey === date;
-    });
+    // R4.4 (PRD R4.4.AC1) — real per-agent shellout. The R3 race
+    // wrapper + AbortController stay unchanged per the
+    // r3-per-agent-runbook contract; ONLY the task body swaps from
+    // in-memory filter to `ccusage <agent> session --json --mode calculate`.
+    //
+    // Test-mode `deps.perAgentTask` injection lets the existing
+    // /api/per-agent route tests run without spawning the binary AND
+    // preserves the R3 e2e contract test's mock for the all-timeout
+    // path. Production uses the default `defaultPerAgentTask`.
+    //
+    // Date-of-day → ccusage's `--since` / `--until` filter (YYYYMMDD
+    // format per `ccusage claude session --help`). Native `mode
+    // calculate` matches our pricing baseline.
+    const yyyymmdd = date.replace(/-/g, "");
+    const ccusageBin = deps.ccusageBin ?? "ccusage";
+    const perAgentTimeoutMs = deps.perAgentTaskTimeoutMs
+      ?? ((deps.perAgentBudgetMs ?? PER_AGENT_BUDGET_MS) + 200);
+
+    const defaultPerAgentTask = async (
+      agent: string, signal: AbortSignal,
+    ): Promise<{ totalCostUSD: number; totalTokens: number; sessionCount: number }> => {
+      try {
+        const out = await runCcusageAgent<{ sessions?: Array<{
+          totalCost?: number; totalTokens?: number; inputTokens?: number;
+          outputTokens?: number; cacheCreationTokens?: number; cacheReadTokens?: number;
+        }> }>(agent, "session", {
+          bin: ccusageBin,
+          timeoutMs: perAgentTimeoutMs,
+          extraArgs: ["--mode", "calculate", "--since", yyyymmdd, "--until", yyyymmdd],
+          signal,
+        });
+        // R4.4.AC5 — individual failure swallowed silently per spec:
+        // if sessions is absent/empty, return zeros (the agent appears
+        // as "0 sessions / $0" in the UI per R3.6.AC5).
+        const sessions = out.sessions ?? [];
+        let totalCostUSD = 0;
+        let totalTokens = 0;
+        for (const s of sessions) {
+          const cost = s.totalCost;
+          if (typeof cost === "number" && Number.isFinite(cost)) totalCostUSD += cost;
+          const tok = s.totalTokens;
+          if (typeof tok === "number" && Number.isFinite(tok)) totalTokens += tok;
+        }
+        return { totalCostUSD, totalTokens, sessionCount: sessions.length };
+      } catch (e) {
+        // Per R3.6.AC5 — individual agent failure silently surfaces as
+        // "0 sessions / $0" zero result. The race wrapper's `failed[]`
+        // bucket distinguishes timeout vs throw for the UI; we route
+        // the spawn-fail (non-zero exit etc.) into the failed bucket
+        // by re-throwing so shellPerAgent classifies it.
+        throw e;
+      }
+    };
+
+    const task = deps.perAgentTask ?? defaultPerAgentTask;
 
     const summary = await shellPerAgent<{ totalCostUSD: number; totalTokens: number; sessionCount: number }>({
       agents,
       budgetMs: deps.perAgentBudgetMs ?? PER_AGENT_BUDGET_MS,
-      task: async (agent, _signal) => {
-        const rs = todaysSessions.filter((s) => s.agent === agent);
-        let totalCostUSD = 0;
-        let totalTokens = 0;
-        for (const s of rs) {
-          totalCostUSD += Number.isFinite(s.totalCost)   ? s.totalCost   : 0;
-          totalTokens  += Number.isFinite(s.totalTokens) ? s.totalTokens : 0;
-        }
-        return { totalCostUSD, totalTokens, sessionCount: rs.length };
-      },
+      task,
     });
 
     res.json({ date, tz, ...summary });

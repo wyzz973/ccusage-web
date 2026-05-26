@@ -18,6 +18,21 @@ export async function runCcusage<T = unknown>(command: string, opts: RunnerOptio
   return execAndParse(opts.bin, args, opts.timeoutMs, opts.signal);
 }
 
+/**
+ * R4.4 — per-source CLI invocation: `ccusage <agent> <cmd> --json …`
+ * (note: order matters — ccusage rejects `<agent> --json <cmd>`).
+ * Used by `/api/per-agent` to fan out to `ccusage claude session`,
+ * `ccusage codex session`, etc. Honors the same `signal` contract as
+ * `runCcusage` so the R3 race wrapper (per-agent budget + AbortController)
+ * cancels in-flight shellouts at the wall-clock boundary.
+ */
+export async function runCcusageAgent<T = unknown>(
+  agent: string, command: string, opts: RunnerOptions,
+): Promise<T> {
+  const args = [agent, command, "--json", ...(opts.extraArgs ?? [])];
+  return execAndParse(opts.bin, args, opts.timeoutMs, opts.signal);
+}
+
 export async function getCcusageVersion(opts: { bin: string; timeoutMs: number }): Promise<string> {
   const text = await execAndCollect(opts.bin, ["--version"], opts.timeoutMs);
   return text.trim();
