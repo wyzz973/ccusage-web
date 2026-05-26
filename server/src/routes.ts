@@ -1,10 +1,14 @@
 import { Router, type Response } from "express";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { SnapshotStore } from "./snapshot-store.js";
 import type { SseHub } from "./sse-hub.js";
 import {
   bucketHourly, getTodayKey,
   shellPerAgent, PER_AGENT_BUDGET_MS,
 } from "./insights/index.js";
+import type { LoadedConfig } from "./insights/config-loader.js";
 import type { UsageRecord } from "./types.js";
 
 export interface RoutesDeps {
@@ -18,6 +22,15 @@ export interface RoutesDeps {
    * Test-only escape hatch; production should leave it at the default.
    */
   perAgentBudgetMs?: number;
+  /**
+   * R3.9 — the active LoadedConfig (resolved at app boot from the
+   * priority chain). Surfaced verbatim on `/api/health` for debug
+   * visibility, and the `mergedFrom: string[]` provenance closes
+   * R3.9.AC2.
+   */
+  config?: LoadedConfig;
+  /** R3.12 — overridable schema path for tests. Defaults to `docs/config-schema.json`. */
+  configSchemaPath?: string;
 }
 
 const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -45,7 +58,39 @@ export function createRoutes(deps: RoutesDeps): Router {
   });
 
   r.get("/health", (_req, res) => {
-    res.json(deps.store.getHealth());
+    // R3.9.AC2: surface the active config's mergedFrom provenance on
+    // /api/health so an ops sweep can see which files contributed
+    // without grepping the loader logs.
+    const base = deps.store.getHealth();
+    const enriched = deps.config
+      ? { ...base, config: { mergedFrom: deps.config.mergedFrom, active: deps.config.config } }
+      : base;
+    res.json(enriched);
+  });
+
+  /**
+   * R3.12.AC3 — JSON schema endpoint for IDE autocomplete + tooling.
+   * Returns the static schema verbatim with `application/schema+json`
+   * content-type (per draft-07 IANA registration).
+   */
+  r.get("/config-schema", (_req, res) => {
+    try {
+      // Resolve from the source-relative path so the route works in
+      // both dev (tsx) and built (dist/) modes. Override via
+      // `deps.configSchemaPath` in tests.
+      let schemaPath = deps.configSchemaPath;
+      if (!schemaPath) {
+        const here = fileURLToPath(import.meta.url);
+        // <repo>/server/src/routes.ts → walk up to <repo> then docs/.
+        // (built bundle path is symmetric to <repo>/server/dist/...).
+        const repoRoot = path.resolve(path.dirname(here), "..", "..");
+        schemaPath = path.join(repoRoot, "docs", "config-schema.json");
+      }
+      const text = fs.readFileSync(schemaPath, "utf8");
+      res.type("application/schema+json").send(text);
+    } catch (e) {
+      res.status(500).json({ error: `config-schema unavailable: ${(e as Error).message}` });
+    }
   });
 
   /**

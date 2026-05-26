@@ -1,4 +1,5 @@
-import { AlertTriangle } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn, formatCost, formatNumber } from "@/lib/utils";
 import { formatPct } from "../lib/format";
@@ -33,11 +34,34 @@ export interface BlockHistoryStripProps {
   x1BannerActive?: boolean;
 }
 
+// R3.3 — `--order` toggle persistence key for the trailing-7 strip.
+// Default `desc` = newest-on-right (the existing layout). User toggle
+// flips to `asc` = newest-on-left for reverse-chronological inspection.
+const LS_BLOCKS_DESC = "ccusage.order.blocks.desc";
+
+function readInitialBlocksDesc(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    const v = window.localStorage.getItem(LS_BLOCKS_DESC);
+    return v === "false" ? false : true;
+  } catch { return true; }
+}
+
 export function BlockHistoryStrip({ blocks, limitReset, x1BannerActive = false }: BlockHistoryStripProps): JSX.Element {
   const perBlockTokenLimit = useV1Store((s) => s.mode.perBlockTokenLimit);
   const usable = blocks.filter((b) => !b.isGap);
   const active = usable.find((b) => b.isActive) ?? null;
-  const recent = usable.filter((b) => !b.isActive).slice(-7);
+  // R3.3 — desc default (newest-on-right). When user toggles to asc, we
+  // reverse the trailing-7 in place so the leftmost cell is newest.
+  const [blocksDesc, setBlocksDesc] = useState<boolean>(() => readInitialBlocksDesc());
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try { window.localStorage.setItem(LS_BLOCKS_DESC, String(blocksDesc)); } catch { /* */ }
+  }, [blocksDesc]);
+  const recent = useMemo(() => {
+    const base = usable.filter((b) => !b.isActive).slice(-7);
+    return blocksDesc ? base : base.slice().reverse();
+  }, [usable, blocksDesc]);
 
   // Cap surrogate: max of trailing-7 + active. Min 1 to avoid /0.
   const trailing = [active, ...recent].filter((b): b is Block => b != null);
@@ -107,6 +131,17 @@ export function BlockHistoryStrip({ blocks, limitReset, x1BannerActive = false }
           <div>
             <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
               <span>Last {recent.length} blocks · % of cap</span>
+              {/* R3.3 — order toggle. Default desc (newest right). */}
+              <button
+                type="button"
+                onClick={() => setBlocksDesc((d) => !d)}
+                className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 hover:bg-muted/40 hover:text-foreground"
+                aria-label={blocksDesc ? "Sort blocks ascending (newest left)" : "Sort blocks descending (newest right)"}
+                data-testid="blocks-order-toggle"
+              >
+                {blocksDesc ? <ChevronDown className="h-3 w-3" aria-hidden="true" /> : <ChevronUp className="h-3 w-3" aria-hidden="true" />}
+                <span>{blocksDesc ? "desc" : "asc"}</span>
+              </button>
             </div>
             <div className="flex items-end gap-1 h-12" role="img" aria-label="History of recent billing blocks">
               {recent.map((b) => {

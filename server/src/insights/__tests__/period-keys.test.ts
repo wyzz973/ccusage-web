@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   getTodayKey, getMonthKey,
   getWeekStartKey, getISOWeekNumberKey,
@@ -79,5 +79,44 @@ describe("getISOWeekNumberKey (legacy YYYY-Www; not used by computeDerived)", ()
 
   it("getISOWeekKey alias is preserved for back-compat", () => {
     expect(getISOWeekKey).toBe(getISOWeekNumberKey);
+  });
+});
+
+// R3.2 — startOfWeek honoring (PRD v3 §1 R3.2.AC1–AC3).
+describe("getWeekStartKey · startOfWeek anchor (R3.2)", () => {
+  // 2026-05-20 is a Wednesday. The expected anchor for each
+  // startOfWeek value, derived by walking back from Wed.
+  const cases: Array<[string, string]> = [
+    ["monday",    "2026-05-18"], // back 2 days
+    ["tuesday",   "2026-05-19"], // back 1 day
+    ["wednesday", "2026-05-20"], // same day
+    ["thursday",  "2026-05-14"], // back 6 days
+    ["friday",    "2026-05-15"], // back 5 days
+    ["saturday",  "2026-05-16"], // back 4 days
+    ["sunday",    "2026-05-17"], // back 3 days
+  ];
+  it.each(cases)("Wednesday 2026-05-20 with startOfWeek=%s → %s", (sow, expected) => {
+    expect(getWeekStartKey(new Date("2026-05-20T12:00:00Z"), "UTC", sow as never)).toBe(expected);
+  });
+
+  it("invalid startOfWeek falls back to monday with console.warn", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      expect(getWeekStartKey(new Date("2026-05-20T12:00:00Z"), "UTC", "funday" as never)).toBe("2026-05-18");
+      expect(warnSpy).toHaveBeenCalled();
+      expect(String(warnSpy.mock.calls[0]?.[0] ?? "")).toMatch(/invalid startOfWeek/);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("DST transition (spring forward): startOfWeek=sunday picks correct Sunday in America/Los_Angeles", () => {
+    // 2026-03-10 was a Tuesday. DST in LA fires Sunday 2026-03-08 at 02:00.
+    // startOfWeek=sunday on the Tuesday → anchor Sunday 2026-03-08.
+    expect(getWeekStartKey(new Date("2026-03-10T20:00:00Z"), "America/Los_Angeles", "sunday")).toBe("2026-03-08");
+  });
+
+  it("year boundary: startOfWeek=monday on Jan 1 2027 picks Mon 2026-12-28", () => {
+    expect(getWeekStartKey(new Date("2027-01-01T12:00:00Z"), "UTC", "monday")).toBe("2026-12-28");
   });
 });

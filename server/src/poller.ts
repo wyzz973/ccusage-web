@@ -31,6 +31,13 @@ export interface PollerDeps {
    * or, post-M6.d-flip, the auto-fallback when soak-drift trips).
    */
   parserMode?: "native" | "fallback";
+  /**
+   * R3.2 — start-of-week anchor for the week-key derivation. Default
+   * `monday` matches ccusage's emitted weekly bucket prefix; non-default
+   * requires the same `--start-of-week` flag to be passed to the
+   * ccusage binary (handled by `app.ts` extraArgs).
+   */
+  startOfWeek?: import("./insights/period-keys.js").StartOfWeek;
 }
 
 export interface Poller {
@@ -46,6 +53,8 @@ export interface ComputeDerivedDeps {
   tz?: string;
   /** M6.d (R3) — stamped onto `derived.mode.parser` for the UI badge. */
   parserMode?: "native" | "fallback";
+  /** R3.2 — week-anchor. Default monday. */
+  startOfWeek?: import("./insights/period-keys.js").StartOfWeek;
 }
 
 export function computeDerived(
@@ -56,9 +65,9 @@ export function computeDerived(
   const tz = deps.tz ?? "UTC";
   const todayKey = getTodayKey(now, tz);
   const monthKey = getMonthKey(now, tz);
-  // M-A1 (R1.5): ccusage emits weekly periods as Monday-anchored YYYY-MM-DD,
-  // not ISO YYYY-Www. Use the Monday-anchored form so the filter matches.
-  const weekKey = getWeekStartKey(now, tz);
+  // R3.2 — week key anchored on `startOfWeek` (default monday matches
+  // ccusage's emitted prefix per M-A1 / R1.5).
+  const weekKey = getWeekStartKey(now, tz, deps.startOfWeek ?? "monday");
 
   const sum = (rs: UsageRecord[]): { tokens: number; cost: number } => rs.reduce(
     (acc, r) => ({ tokens: acc.tokens + r.totalTokens, cost: acc.cost + r.totalCost }),
@@ -300,6 +309,7 @@ export function createPoller(deps: PollerDeps): Poller {
   const now = deps.now ?? (() => new Date());
   const tz = deps.tz ?? "UTC";
   const parserMode = deps.parserMode ?? "fallback";
+  const startOfWeek = deps.startOfWeek ?? "monday";
   let timer: NodeJS.Timeout | null = null;
   let running = false;
 
@@ -335,7 +345,7 @@ export function createPoller(deps: PollerDeps): Poller {
         monthly: { records: buckets.monthly ?? [] },
         session: { records: buckets.session ?? [] },
         blocks:  { records: buckets.blocks ?? [] },
-        derived: computeDerived(buckets, now(), { tz, parserMode }),
+        derived: computeDerived(buckets, now(), { tz, parserMode, startOfWeek }),
       };
       deps.store.set(snap);
     } catch (err) {

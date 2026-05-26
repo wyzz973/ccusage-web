@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ccusage-web.example/config-schema.json",
+  "title": "ccusage-web config",
+  "description": "Per PRD v3 §1 R3.9–R3.12. Configures cost-mode, week-start, sort order, budget thresholds, and timezone. Loader priority chain: CLI > env CCUSAGE_CONFIG > .ccusage/ccusage.json (project, cwd walk-up) > ~/.config/claude/ccusage.json (user) > ~/.claude/ccusage.json (legacy) > defaults. Higher-priority files override lower for each key.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "IDE-autocomplete pointer. Loader recognizes + ignores per R3.12.AC2."
+    },
+    "tokenLimit": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Pre-block token limit (R3.7). Drives the --token-limit flag passthrough to ccusage shellout."
+    },
+    "monthlyCapUSD": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Monthly USD cap (R3.7). When set, the X1 banner fires once projected month-end > cap."
+    },
+    "perBlockTokenLimit": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Per-block token cap (R3.7). Drives the amber X1 chip in BlockHistoryStrip."
+    },
+    "startOfWeek": {
+      "type": "string",
+      "enum": ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"],
+      "description": "Which day starts the week (R3.2). Defaults to monday."
+    },
+    "order": {
+      "type": "string",
+      "enum": ["asc","desc"],
+      "description": "Default sort order for tables (R3.3). Defaults to desc."
+    },
+    "costMode": {
+      "type": "string",
+      "enum": ["calculate","auto","display"],
+      "description": "Cost-mode override for the ccusage shellout (R3 §D). Defaults to calculate."
+    },
+    "timezone": {
+      "type": "string",
+      "minLength": 1,
+      "description": "IANA timezone for date-bucket keys + display rollover. Defaults to the host's resolved timezone."
+    }
+  }
+}

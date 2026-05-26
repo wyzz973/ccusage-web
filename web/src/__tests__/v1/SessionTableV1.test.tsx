@@ -44,3 +44,50 @@ describe("SessionTableV1 — virtualization (Round-1 bug fix #2)", () => {
     expect(rows.length).toBe(1);
   });
 });
+
+// R3.3 — `--order asc|desc` toggle persistence + chevron + a11y.
+describe("SessionTableV1 — R3.3 sort toggle", () => {
+  beforeEach(() => {
+    try { window.localStorage.clear(); } catch { /* */ }
+  });
+
+  it("active column header carries aria-sort + chevron icon", () => {
+    render(<SessionTableV1 records={[rec("a", 1), rec("b", 2)]} />);
+    // Default sortKey = totalCost, desc = true.
+    expect(screen.getByTestId("session-sort-totalCost")).toHaveAttribute("aria-sort", "descending");
+  });
+
+  it("clicking active header toggles desc→asc and updates aria-sort", () => {
+    render(<SessionTableV1 records={[rec("a", 1), rec("b", 2)]} />);
+    fireEvent.click(screen.getByTestId("session-sort-totalCost"));
+    // Re-query after re-render — HeaderCell is a closure-defined component so
+    // the DOM node is remounted and the prior reference is stale.
+    expect(screen.getByTestId("session-sort-totalCost")).toHaveAttribute("aria-sort", "ascending");
+  });
+
+  it("clicking a different header sets it as active with desc default (per AC2)", () => {
+    render(<SessionTableV1 records={[rec("a", 1)]} />);
+    fireEvent.click(screen.getByTestId("session-sort-period"));
+    expect(screen.getByTestId("session-sort-period")).toHaveAttribute("aria-sort", "descending");
+  });
+
+  it("persists sort key + direction to localStorage", () => {
+    render(<SessionTableV1 records={[rec("a", 1)]} />);
+    fireEvent.click(screen.getByTestId("session-sort-totalCost")); // desc → asc
+    expect(window.localStorage.getItem("ccusage.order.sessions.key")).toBe("totalCost");
+    expect(window.localStorage.getItem("ccusage.order.sessions.desc")).toBe("false");
+  });
+
+  it("restores persisted sort key + direction on mount", () => {
+    window.localStorage.setItem("ccusage.order.sessions.key", "period");
+    window.localStorage.setItem("ccusage.order.sessions.desc", "false");
+    render(<SessionTableV1 records={[rec("a", 1)]} />);
+    expect(screen.getByTestId("session-sort-period")).toHaveAttribute("aria-sort", "ascending");
+  });
+
+  it("ArrowUp on active descending header flips to ascending (AC3 keyboard)", () => {
+    render(<SessionTableV1 records={[rec("a", 1)]} />);
+    fireEvent.keyDown(screen.getByTestId("session-sort-totalCost"), { key: "ArrowUp" });
+    expect(screen.getByTestId("session-sort-totalCost")).toHaveAttribute("aria-sort", "ascending");
+  });
+});

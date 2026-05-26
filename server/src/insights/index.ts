@@ -32,3 +32,5 @@ export {
   type PerAgentStatus, type AgentResult,
   type PerAgentSummary, type PerAgentTask, type ShellPerAgentOptions,
 } from "./per-agent.js";
+export { loadConfig, findProjectConfig } from "./config-loader.js";
+export type { Config, LoadedConfig, ConfigLoaderDeps } from "./config-loader.js";

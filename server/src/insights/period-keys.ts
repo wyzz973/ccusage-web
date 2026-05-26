@@ -41,18 +41,50 @@ export function getMonthKey(now: Date, tz: string): string {
 }
 
 /**
- * Monday of the current ISO week, in YYYY-MM-DD format.
+ * Anchor day of the current week, in YYYY-MM-DD format.
  *
- * This matches ccusage's `weekly --json` `period` field exactly. Sunday
- * counts as the end of the *previous* week (ISO convention: weeks start
- * on Monday).
+ * Default (ISO convention): Monday-anchored — matches ccusage's
+ * `weekly --json` `period` field exactly. R3.2: caller can pass
+ * `startOfWeek` to anchor the week on a different day; invalid values
+ * fall back to Monday with a `console.warn`. Valid values:
+ *   monday | tuesday | wednesday | thursday | friday | saturday | sunday
+ *
+ * Note: with `startOfWeek !== "monday"`, the returned key no longer
+ * matches ccusage's emitted week buckets verbatim. Callers using the
+ * week key as a filter for ccusage's weekly records should pass the
+ * same `--start-of-week` flag to the binary (R3.2.AC4: D2 picker +
+ * server flag must agree).
  */
-export function getWeekStartKey(now: Date, tz: string): string {
+export type StartOfWeek =
+  | "monday" | "tuesday" | "wednesday" | "thursday"
+  | "friday" | "saturday" | "sunday";
+
+const VALID_START_OF_WEEK: ReadonlySet<StartOfWeek> = new Set<StartOfWeek>([
+  "monday","tuesday","wednesday","thursday","friday","saturday","sunday",
+]);
+
+const START_OF_WEEK_INDEX: Record<StartOfWeek, number> = {
+  monday: 0, tuesday: 1, wednesday: 2, thursday: 3,
+  friday: 4, saturday: 5, sunday: 6,
+};
+
+export function getWeekStartKey(now: Date, tz: string, startOfWeek: StartOfWeek = "monday"): string {
+  let sow: StartOfWeek = startOfWeek;
+  if (!VALID_START_OF_WEEK.has(sow)) {
+    console.warn(`[ccusage-web/period-keys] invalid startOfWeek=${JSON.stringify(startOfWeek)}; falling back to monday`);
+    sow = "monday";
+  }
   const { y, m, d } = getCalendarParts(now, tz);
   const date = new Date(Date.UTC(y, m - 1, d));
-  // Mon=0..Sun=6 → shift back to Monday.
-  const dayNum = (date.getUTCDay() + 6) % 7;
-  date.setUTCDate(date.getUTCDate() - dayNum);
+  // JS getUTCDay: Sun=0..Sat=6. Normalize to Mon=0..Sun=6.
+  const monBased = (date.getUTCDay() + 6) % 7;
+  // Subtract enough to land on the configured start-of-week anchor.
+  // Example: sow="wednesday" → index 2 → if today is Friday (monBased=4),
+  // delta=4-2=2 → anchor on Wednesday.
+  const sowIndex = START_OF_WEEK_INDEX[sow];
+  let delta = monBased - sowIndex;
+  if (delta < 0) delta += 7;
+  date.setUTCDate(date.getUTCDate() - delta);
   const yy = date.getUTCFullYear();
   const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(date.getUTCDate()).padStart(2, "0");

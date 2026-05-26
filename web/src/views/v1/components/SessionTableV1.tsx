@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState, useLayoutEffect } from "react";
+import { useMemo, useRef, useState, useLayoutEffect, useEffect } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn, formatCost, formatNumber } from "@/lib/utils";
@@ -10,12 +11,40 @@ import type { UsageRecord } from "@/types";
 // B5 · Sessions table — virtualized to fix Round-1 bug #2 (323-row blow-up
 // on real data). Hand-rolled windowing avoids pulling in react-window
 // while still keeping the DOM bounded.
+//
+// R3.3 — `--order asc|desc` honoring: column-header click toggles the
+// active sort order (default `desc` per AC2 / ccusage convention);
+// persists in `localStorage("ccusage.order.sessions")` and the matching
+// `…sortKey` key so the layout survives a reload. Keyboard
+// accessibility comes for free via the native <button> element
+// (Enter/Space activate); AC3's arrow-key behaviour is layered on top.
 
 const ROW_HEIGHT = 36;
 const OVERSCAN = 5;
 const CONTAINER_HEIGHT = 420;
 
 type SortKey = "period" | "agent" | "project" | "totalTokens" | "totalCost";
+
+const VALID_SORT_KEYS: ReadonlySet<SortKey> = new Set<SortKey>([
+  "period", "agent", "project", "totalTokens", "totalCost",
+]);
+
+const LS_SORT_KEY = "ccusage.order.sessions.key";
+const LS_SORT_DESC = "ccusage.order.sessions.desc";
+
+function readInitialSort(): { key: SortKey; desc: boolean } {
+  if (typeof window === "undefined") return { key: "totalCost", desc: true };
+  try {
+    const k = window.localStorage.getItem(LS_SORT_KEY);
+    const d = window.localStorage.getItem(LS_SORT_DESC);
+    const key: SortKey = (k && VALID_SORT_KEYS.has(k as SortKey)) ? k as SortKey : "totalCost";
+    // Default desc per R3.3.AC2 — explicit "false" only when persisted asc.
+    const desc = d === "false" ? false : true;
+    return { key, desc };
+  } catch {
+    return { key: "totalCost", desc: true };
+  }
+}
 
 export interface SessionTableV1Props {
   records: UsageRecord[];
@@ -30,8 +59,17 @@ export function SessionTableV1({
   containerHeight = CONTAINER_HEIGHT,
 }: SessionTableV1Props): JSX.Element {
   const [q, setQ] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("totalCost");
-  const [desc, setDesc] = useState(true);
+  const initial = useMemo(() => readInitialSort(), []);
+  const [sortKey, setSortKey] = useState<SortKey>(initial.key);
+  const [desc, setDesc] = useState(initial.desc);
+  // R3.3 — persist on every change so reload survives.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(LS_SORT_KEY, sortKey);
+      window.localStorage.setItem(LS_SORT_DESC, String(desc));
+    } catch { /* private mode etc. */ }
+  }, [sortKey, desc]);
   const filters = useV1Store((s) => s.filters);
   const addFilter = useV1Store((s) => s.addFilter);
 
@@ -88,11 +126,25 @@ export function SessionTableV1({
         <button
           type="button"
           onClick={() => { if (active) setDesc(!desc); else { setSortKey(k); setDesc(true); } }}
+          // R3.3.AC3 — arrow-key + Enter accessibility. Enter/Space are
+          // automatic on <button>; ArrowUp/Down explicitly toggle desc
+          // when the column is already active.
+          onKeyDown={(e) => {
+            if (!active) return;
+            if (e.key === "ArrowUp" && desc)  { setDesc(false); e.preventDefault(); }
+            if (e.key === "ArrowDown" && !desc) { setDesc(true); e.preventDefault(); }
+          }}
           className={cn("inline-flex items-center gap-1 hover:text-zinc-100", active && "text-zinc-100")}
           aria-sort={active ? (desc ? "descending" : "ascending") : "none"}
+          data-testid={`session-sort-${k}`}
         >
           {label}
-          {active && <span className="text-[9px]">{desc ? "▼" : "▲"}</span>}
+          {active && (
+            // R3.3.AC2 — lucide chevron affordance + textual fallback
+            // hidden behind aria-hidden so screenreaders use aria-sort.
+            desc ? <ChevronDown className="h-3 w-3" aria-hidden="true" />
+                 : <ChevronUp   className="h-3 w-3" aria-hidden="true" />
+          )}
         </button>
       </th>
     );

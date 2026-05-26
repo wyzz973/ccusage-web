@@ -37,6 +37,8 @@ function makeApp(opts: {
   detectedAgents?: string[];
   tz?: string;
   perAgentBudgetMs?: number;
+  config?: { mergedFrom: string[]; config: Record<string, unknown> };
+  configSchemaPath?: string;
 }) {
   const store = createSnapshotStore();
   if (opts.populated) store.set(snap("2026-05-24T10:00:00Z", opts.sessionRecords ?? [], opts.detectedAgents ?? []));
@@ -48,6 +50,8 @@ function makeApp(opts: {
     refresh: opts.runOnce ?? (async () => {}),
     tz: opts.tz,
     perAgentBudgetMs: opts.perAgentBudgetMs,
+    config: opts.config as never,
+    configSchemaPath: opts.configSchemaPath,
   }));
   return { app, store, hub };
 }
@@ -136,6 +140,47 @@ describe("routes", () => {
       const { app } = makeApp({});
       const res = await request(app).get("/api/usage/hourly?date=2026-05-25&tz=UTC");
       expect(res.status).toBe(503);
+    });
+  });
+
+  // R3.9.AC2 + R3.12.AC3 — config endpoints.
+  describe("config endpoints (R3.9 + R3.12)", () => {
+    it("GET /api/health surfaces mergedFrom + active config when present", async () => {
+      const { app } = makeApp({
+        populated: true,
+        config: { mergedFrom: ["/srv/cli.json"], config: { order: "asc" } },
+      });
+      const res = await request(app).get("/api/health");
+      expect(res.status).toBe(200);
+      expect(res.body.config).toEqual({
+        mergedFrom: ["/srv/cli.json"],
+        active: { order: "asc" },
+      });
+    });
+
+    it("GET /api/health omits config field when no loaded config supplied", async () => {
+      const { app } = makeApp({ populated: true });
+      const res = await request(app).get("/api/health");
+      expect(res.status).toBe(200);
+      expect(res.body.config).toBeUndefined();
+    });
+
+    it("GET /api/config-schema returns the JSON schema with schema+json content-type", async () => {
+      const { app } = makeApp({});
+      const res = await request(app).get("/api/config-schema");
+      expect(res.status).toBe(200);
+      expect(res.headers["content-type"]).toMatch(/application\/schema\+json/);
+      const body = JSON.parse(res.text);
+      expect(body.$schema).toMatch(/json-schema/);
+      expect(body.properties.tokenLimit).toBeTruthy();
+      expect(body.properties.startOfWeek.enum).toContain("monday");
+    });
+
+    it("GET /api/config-schema returns 500 with helpful error when schema file is missing", async () => {
+      const { app } = makeApp({ configSchemaPath: "/definitely/not/here.json" });
+      const res = await request(app).get("/api/config-schema");
+      expect(res.status).toBe(500);
+      expect(res.body.error).toMatch(/config-schema unavailable/);
     });
   });
 
