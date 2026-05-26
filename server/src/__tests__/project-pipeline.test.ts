@@ -22,6 +22,7 @@ import { describe, it, expect } from "vitest";
 import { stampProjects, buildSessionProjectMap } from "../poller";
 import { computeProjectRollups, decodeProject } from "../insights/index.js";
 import { runNative } from "../native/index.js";
+import { mockClaudeProjectsTree } from "./helpers/mock-projects-tree";
 import type { UsageRecord, Block } from "../types";
 
 /** A ccusage-shape session record (no project field — real ccusage --json output). */
@@ -107,35 +108,40 @@ describe("stampProjects ↔ ccusage-shape session records (M-R2-1 closure)", () 
 
 describe("full pipeline: real-shape sessions → derived.projects (M-R2-1 PASS)", () => {
   it("produces ≥1 derived.projects row + ≥1 stamped session, with non-degenerate chip identity", () => {
-    // (1) Mock the discovered file tree (would normally come from ~/.claude/projects/**).
-    const map = buildSessionProjectMap({
-      discover: () => [
-        "/u/.claude/projects/-Users-sd3-code-ccusage-web/sess-aaa.jsonl",
-        "/u/.claude/projects/-Users-sd3-code-ccusage-web/sess-bbb.jsonl",
-        "/u/.claude/projects/-Users-sd3-code-react-router/sess-ccc.jsonl",
-      ],
-    });
+    // Builds the discover() mock, real-shape session records (NO project
+    // field — matches ccusage's actual --json output), and pre-computed
+    // sessionId→canonical map in one declarative call. This is the
+    // pattern every future PRD-AC test should use to avoid synthetic-fixture
+    // false-positives (R1 bug-A / R2 M-R2-1 shape).
+    const tree = mockClaudeProjectsTree(
+      {
+        "/u/.claude/projects": {
+          "-Users-sd3-code-ccusage-web":  ["sess-aaa", "sess-bbb"],
+          "-Users-sd3-code-react-router": ["sess-ccc"],
+        },
+      },
+      // Override per-session cost so the assertion is readable.
+      { costFor: (id) => (id === "sess-aaa" ? 6.10 : id === "sess-bbb" ? 4.00 : 2.50) },
+    );
 
-    // (2) Real-shape ccusage --json session records (NO project field).
-    const sessions = [
-      ccusageSession("sess-aaa", "claude", 6.10),
-      ccusageSession("sess-bbb", "claude", 4.00),
-      ccusageSession("sess-ccc", "codex",  2.50),
-    ];
+    // Real producer step — exactly what the poller does each tick.
+    const map = buildSessionProjectMap({ discover: tree.discover });
+    const stamped = stampProjects(tree.sessionRecords, map);
 
-    // (3) Stamp.
-    const stamped = stampProjects(sessions, map);
+    // PASS (a): ≥1 stamped session.
     const projectCount = stamped.filter((r) => r.project != null).length;
     expect(projectCount).toBeGreaterThanOrEqual(1);
     expect(projectCount).toBe(3);
 
-    // (4) Roll up.
+    // PASS (b): ≥1 row in derived.projects.
     const projects = computeProjectRollups({ sessionRecords: stamped });
     expect(projects.length).toBeGreaterThanOrEqual(1);
     expect(projects.length).toBe(2); // ccusage-web (combined) + react-router
 
-    // (5) Chip identity: same basename (`web` from `ccusage-web`) must not
-    //     collide with another project's basename. Canonical is the dedup key.
+    // PASS (c): chip identity stays unique across same-basename projects
+    // — `ccusage-web` and `react-router` both end in different basenames
+    // here, but the canonical IS the dedup key so an S3-class regression
+    // can't sneak back in.
     const ccusageWeb = projects.find((p) => p.canonical === "-Users-sd3-code-ccusage-web");
     expect(ccusageWeb).toBeTruthy();
     expect(ccusageWeb!.displayName).toBe("web");
@@ -155,42 +161,41 @@ describe("full pipeline: real-shape sessions → derived.projects (M-R2-1 PASS)"
 
 describe("native runner stamps project from filePath (M-R2-1, native source)", () => {
   it("emits session records with project canonical decoded from the file path", async () => {
-    const FILE_A = "/u/.claude/projects/-Users-sd3-code-ccusage-web/sess-aaa.jsonl";
-    const FILE_B = "/u/.claude/projects/-Users-sd3-code-react-router/sess-bbb.jsonl";
-    const CONTENT_A = '{"timestamp":"2026-05-18T10:00:00Z","sessionId":"sa","requestId":"ra","message":{"id":"ma","model":"claude-haiku-4-5","usage":{"input_tokens":1000,"output_tokens":500}}}';
-    const CONTENT_B = '{"timestamp":"2026-05-18T11:00:00Z","sessionId":"sb","requestId":"rb","message":{"id":"mb","model":"claude-opus-4-7","usage":{"input_tokens":500,"output_tokens":250}}}';
-    const fakeFs = {
-      readFileSync: (p: string): string => p === FILE_A ? CONTENT_A : p === FILE_B ? CONTENT_B : "",
-    };
+    const tree = mockClaudeProjectsTree({
+      "/u/.claude/projects": {
+        "-Users-sd3-code-ccusage-web":  ["sess-aaa"],
+        "-Users-sd3-code-react-router": ["sess-bbb"],
+      },
+    });
 
     const out = await runNative<{ session: UsageRecord[] }>("session", {
-      files: [FILE_A, FILE_B],
-      fs: fakeFs,
+      files: tree.files,
+      fs: tree.fs,
       now: new Date("2026-05-19T12:00:00Z"),
     });
 
-    // Pass condition: every session has project set.
+    // PASS (a) for the native source path: every session has project set.
     const withProject = out.session.filter((r) => r.project != null);
     expect(withProject.length).toBe(out.session.length);
 
-    // Canonical id matches what decodeProject(fullPath) returns.
-    const expectedA = decodeProject({ fullPath: FILE_A }).canonical;
-    const expectedB = decodeProject({ fullPath: FILE_B }).canonical;
+    // Canonical IDs match what decodeProject(fullPath) returns.
     const idA = out.session.find((r) => r.period === "sess-aaa")?.project;
     const idB = out.session.find((r) => r.period === "sess-bbb")?.project;
-    expect(idA).toBe(expectedA);
-    expect(idB).toBe(expectedB);
+    expect(idA).toBe(decodeProject({ fullPath: tree.files.find((f) => f.includes("sess-aaa"))! }).canonical);
+    expect(idB).toBe(decodeProject({ fullPath: tree.files.find((f) => f.includes("sess-bbb"))! }).canonical);
     expect(idA).not.toBe(idB);
   });
 });
 
 describe("daily/weekly/monthly aren't broken by project stamping (regression guard)", () => {
   it("blocks still build cleanly even when sessions have project stamping", async () => {
-    const FILE = "/u/.claude/projects/-x-proj/sess.jsonl";
-    const CONTENT = '{"timestamp":"2026-05-18T10:00:00Z","sessionId":"sx","requestId":"rx","message":{"id":"mx","model":"claude-haiku-4-5","usage":{"input_tokens":100,"output_tokens":50}}}';
-    const fakeFs = { readFileSync: (_p: string): string => CONTENT };
+    const tree = mockClaudeProjectsTree({
+      "/u/.claude/projects": { "-x-proj": ["sess-x"] },
+    });
     const blocksOut = await runNative<{ blocks: Block[] }>("blocks", {
-      files: [FILE], fs: fakeFs, now: new Date("2026-05-18T11:00:00Z"),
+      files: tree.files,
+      fs: tree.fs,
+      now: new Date("2026-05-25T11:00:00Z"),
     });
     expect(blocksOut.blocks.length).toBeGreaterThan(0);
   });
