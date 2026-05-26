@@ -57,14 +57,32 @@ describe("native parser ↔ ccusage golden parity", () => {
   it("synthetic: rejects lines that violate validity rules", () => {
     const content = fs.readFileSync(SYNTHETIC, "utf8");
     const ours = loadJsonlContent(content, { pricing: createPricing() });
-    // We expect 7 cooked entries: synthetic + haiku + (haiku-fast winner of dedup)
-    // + opus-fast + sonnet-tier + sonnet-cache + unknown.
-    expect(ours.entries.length).toBe(7);
+    // We expect 10 cooked entries: synthetic + haiku + (haiku-fast winner of
+    // dedup) + opus-fast + sonnet-tier + sonnet-cache + unknown + R4.0.b's 3
+    // tolerable-null lines (req-10/11/12: isApiErrorMessage:null,
+    // cache_creation_input_tokens:null, cache_read_input_tokens:null).
+    expect(ours.entries.length).toBe(10);
     // The dedup winner must be the higher-tokens entry (req 'dupe' / id 'd' with 900 tokens).
     const dupeWinners = ours.entries.filter((e) => e.requestId === "dupe");
     expect(dupeWinners.length).toBe(1);
     expect(dupeWinners[0]?.totalTokens).toBe(900);
     expect(dupeWinners[0]?.speed).toBe("fast");
+  });
+
+  it("synthetic R4.0.b: tolerable-null lines (isApiErrorMessage/cache_*_input_tokens) are KEPT", () => {
+    // Per Researcher v4 §B.2: pre-R4 NULL_FORBIDDEN_FIELDS over-rejected
+    // these three fields, dropping ~90% of modern CC lines (which write
+    // them as `null` when zero). R4.0.b removed them from the forbidden
+    // list; downstream `?? 0` / `=== true` coercion already handles the
+    // nulls cleanly. Lines 12/13/14 of synthetic.jsonl are the canary.
+    const content = fs.readFileSync(SYNTHETIC, "utf8");
+    const ours = loadJsonlContent(content, { pricing: createPricing() });
+    const toleratedReqIds = ["req-10", "req-11", "req-12"];
+    for (const reqId of toleratedReqIds) {
+      const e = ours.entries.find((x) => x.requestId === reqId);
+      expect(e, `req ${reqId} should be KEPT despite tolerable-null field`).toBeTruthy();
+      expect(e!.totalTokens).toBe(1500); // 1000 input + 500 output
+    }
   });
 
   it("synthetic: <synthetic> model is dropped from breakdown but tokens still count", () => {

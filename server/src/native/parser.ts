@@ -17,7 +17,29 @@
 import { calculateCost, type UsageTokens } from "./cost.js";
 import type { PricingFinder } from "./pricing.js";
 
-/** Fields that are NOT allowed to be JSON null on a line. */
+/**
+ * Fields that are NOT allowed to be JSON null on a line.
+ *
+ * R4.0.b (Researcher v4 §B.2) — removed three previously-listed fields:
+ *
+ *   `isApiErrorMessage`            — appears as `null` on ~99% of modern
+ *                                    CC lines (post ~2.1.150 schema flip);
+ *                                    parser line ~250 already coerces via
+ *                                    `=== true` defensive check.
+ *   `cache_creation_input_tokens`  — appears as `null` on any request with
+ *                                    no cache-create; coerced via `?? 0`.
+ *   `cache_read_input_tokens`      — symmetric to above; coerced via `?? 0`.
+ *
+ * Pre-R4 rejection of these as forbidden-nulls dropped ~90% of real
+ * `~/.claude` lines — measured at 54M tokens vs ccusage's 545M (the
+ * 0.10× survival rate from the §B.2 root-cause). The parser's
+ * downstream cooked fields already default these to 0/false safely, so
+ * the rejection was over-strict.
+ *
+ * The remaining fields stay rejected — those genuinely can't be null
+ * on a parseable line (e.g. `sessionId: null` means the line has no
+ * identity to dedup against).
+ */
 const NULL_FORBIDDEN_FIELDS = [
   "id",
   "cwd",
@@ -27,9 +49,6 @@ const NULL_FORBIDDEN_FIELDS = [
   "version",
   "sessionId",
   "requestId",
-  "isApiErrorMessage",
-  "cache_read_input_tokens",
-  "cache_creation_input_tokens",
 ] as const;
 
 const NULL_FORBIDDEN_PATTERNS = NULL_FORBIDDEN_FIELDS.map(

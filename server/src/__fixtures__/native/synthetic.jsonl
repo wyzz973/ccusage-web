@@ -9,3 +9,6 @@
 {"timestamp":"2026-05-01T10:07:00Z","version":"1.0.0","sessionId":"sess-4","requestId":"req-7","message":{"id":"m7","model":"claude-sonnet-4","usage":{"input_tokens":250000,"output_tokens":1000}}}
 {"timestamp":"2026-05-01T10:08:00Z","version":"1.0.0","sessionId":"sess-5","requestId":"req-8","message":{"id":"m8","model":"claude-sonnet-4","usage":{"input_tokens":10000,"output_tokens":5000,"cache_creation_input_tokens":3000,"cache_read_input_tokens":7000}}}
 {"timestamp":"2026-05-01T10:09:00Z","version":"1.0.0","sessionId":"sess-6","requestId":"req-9","message":{"id":"m9","model":"unknown-future-model-xyz","usage":{"input_tokens":1000,"output_tokens":500}}}
+{"timestamp":"2026-05-01T10:10:00Z","version":"1.0.0","sessionId":"sess-7","requestId":"req-10","isApiErrorMessage":null,"message":{"id":"m10","model":"claude-haiku-4-5","usage":{"input_tokens":1000,"output_tokens":500}}}
+{"timestamp":"2026-05-01T10:11:00Z","version":"1.0.0","sessionId":"sess-8","requestId":"req-11","message":{"id":"m11","model":"claude-haiku-4-5","usage":{"input_tokens":1000,"output_tokens":500,"cache_creation_input_tokens":null}}}
+{"timestamp":"2026-05-01T10:12:00Z","version":"1.0.0","sessionId":"sess-9","requestId":"req-12","message":{"id":"m12","model":"claude-haiku-4-5","usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":null}}}

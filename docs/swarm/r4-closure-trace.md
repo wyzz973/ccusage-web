@@ -46,6 +46,30 @@ explicit rationale + lead escalation reference. No exceptions.
 
 <!-- Implementer appends one entry per commit. -->
 
+## R4.0.b · Remove 3 fields from NULL_FORBIDDEN_FIELDS (§B.2 H2)
+
+**PRD v4 §1 reference:** R4.0 (S-R2-2 closure batch, hypothesis B.2)
+**Parity row(s) closed:** none direct (correctness fix); predicted "4 of 6 smoke assertions" — see "Findings" below
+**Effort estimate (PRD):** ~30 min
+**Effort actual:** ~20 min for the fix + fixture/oracle extension + investigation
+**Commit SHA(s):** (this commit)
+**Files touched:**
+  - `server/src/native/parser.ts` — removed `isApiErrorMessage`, `cache_creation_input_tokens`, `cache_read_input_tokens` from `NULL_FORBIDDEN_FIELDS`. Downstream `?? 0` / `=== true` defensive coercion already handles the nulls.
+  - `server/src/__fixtures__/native/synthetic.jsonl` — +3 fixture lines (req-10/11/12) each carrying one of the now-tolerated null fields with valid usage block.
+  - `server/src/__fixtures__/native/oracle.synthetic.json` — oracle regenerated: totalCost 1.36795 (was 1.35745), totalTokens 288900 (was 284400), claude-haiku-4-5 cost 0.0175 (was 0.007), edgeCases.lines_kept extended.
+  - `server/src/native/__tests__/native-parity.golden.test.ts` — assertion count 7→10; new test "tolerable-null lines are KEPT" pins the §B.2 contract.
+**AC tests landed:**
+  - `server/src/native/__tests__/native-parity.golden.test.ts` ::: "synthetic R4.0.b: tolerable-null lines (isApiErrorMessage/cache_*_input_tokens) are KEPT"
+**Surface grep proof:**
+  - `grep -A12 "NULL_FORBIDDEN_FIELDS = \[" server/src/native/parser.ts` → 7 entries (was 10); the three removed fields are absent.
+**Smoke / e2e proof:**
+  - Direct probe (`tsx`): pre-R4.0.b parser would have rejected `{"isApiErrorMessage":null}` lines; post-fix accepts them. Verified via standalone `hasUnsupportedNullField` probe.
+  - **`RUN_REAL_PARITY=1` smoke result: 2 of 6 pass (unchanged from R4.0.a baseline).** Block-count still PASS; tokens/per-model/daily/monthly still FAIL with the SAME numbers as pre-R4.0.b (`native=54883696 cc=545332437` for 2026-01).
+  - **Finding: §B.2's predicted "closes 4 of 6 smoke assertions" did NOT materialize.** Investigation (probes in tool-runs) shows the parser change DID take effect — direct probe against the real Jan 2026 lines shows 2529 kept / 0 dropped post-fix. The smoke gap is dominated by a DIFFERENT root cause: `discoverJsonlFiles` only walks Claude roots (`~/.claude/projects`), but `ccusage monthly` is "all detected coding (agent) CLI usage" — it sums Claude + Codex + Gemini + Copilot + OpenClaw + Hermes + Goose + etc. The user's `~/.codex/sessions/` alone has 186 files. The smoke's apples-vs-oranges comparison (single-agent native vs multi-agent ccusage) explains the residual drift.
+**Reviewer recount expectation:** 0 pp (correctness fix; existing parity rows unchanged)
+**Status:** committed — correctness portion of §B.2 closed; smoke gate convergence requires multi-agent discovery (out-of-scope for R4.0; escalating to team-lead)
+**Slip-plan slot opened:** see `docs/swarm/r4-slip-plan.md#r4-0-c-smoke-residual` (next commit after this one)
+
 ## R4.0.a · Port `identify_session_blocks` cluster-and-gap algorithm
 
 **PRD v4 §1 reference:** R4.0 (S-R2-2 closure batch, hypothesis B.1)
