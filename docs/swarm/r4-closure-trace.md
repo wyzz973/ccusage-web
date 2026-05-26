@@ -46,6 +46,26 @@ explicit rationale + lead escalation reference. No exceptions.
 
 <!-- Implementer appends one entry per commit. -->
 
+## R4.0.c · Smoke oracle re-parameterise to `ccusage claude <cmd>`
+
+**PRD v4 §1 reference:** R4.0 (S-R2-2 closure batch, combined regression validation)
+**Parity row(s) closed:** none direct (smoke gate is gate-5, not a parity row); partial smoke convergence — see "Smoke" below
+**Effort estimate (PRD):** XS (folded into R4.0.a/b)
+**Effort actual:** ~45 min (instrumentation + oracle helper + slip-plan)
+**Commit SHA(s):** (this commit)
+**Files touched:**
+  - `server/src/native/__tests__/native-real-parity.smoke.test.ts` — added local `ccusageClaudeOracle<T>(cmd)` helper that spawns `ccusage claude <cmd> --mode calculate --timezone <tz> --json` directly + normalises per-source field names (`date`/`week`/`month` → `period`) back to the unified shape. All 5 oracle call sites swapped from `runCcusage` to the new helper.
+  - `docs/swarm/r4-slip-plan.md` (new) — opens `#multi-agent-discovery` (R5-deferred) + `#opus-4-5-20251101-pricing-drift` (R4.10-scheduled in-round) per the no-silent-drops protocol.
+**AC tests landed:** none new; existing smoke assertions are the AC surface, re-pointed to a comparable scope.
+**Surface grep proof:**
+  - `grep -n "ccusageClaudeOracle\|runCcusage" server/src/native/__tests__/native-real-parity.smoke.test.ts` → 5 uses of the new helper; only mention of runCcusage is in a doc comment explaining why we bypass it.
+**Smoke / e2e proof:**
+  - Pre R4.0.c (post R4.0.b): 2 of 6 pass — block count + smoke wiring; token assertion reported `native=54883696 cc=545332437` (apples-vs-oranges — bare ccusage walked 15-agent default).
+  - Post R4.0.c: **3 of 6 pass**. New PASS: token totals (apples-to-apples now matches exactly, `native=54883696 cc=54883696`). Block count still PASS. Wiring still PASS.
+  - Residual 3 cost-related FAILs: `native=$97.67 cc=$36.76` for 2026-01 monthly, with the per-model breakdown showing an EXACT 1/3 ratio for `claude-opus-4-5-20251101` ($91.37 vs $30.46). Root cause: pricing-data drift specifically for the `-20251101` SHA — our `pricing-data.ts` carries pre-`-20251101` rates; ccusage's LiteLLM snapshot reflects the post-`-20251101` reduction. Closed by R4.10 in-round; slip-plan entry at `#opus-4-5-20251101-pricing-drift`.
+**Reviewer recount expectation:** 0 pp (smoke gate cleanup); convergence of remaining 3 assertions deferred to R4.10's pricing snapshot refresh.
+**Status:** committed — smoke gate convergence partial pending R4.10; multi-agent discovery deferred to R5 with explicit slip-plan slot.
+
 ## R4.0.b · Remove 3 fields from NULL_FORBIDDEN_FIELDS (§B.2 H2)
 
 **PRD v4 §1 reference:** R4.0 (S-R2-2 closure batch, hypothesis B.2)

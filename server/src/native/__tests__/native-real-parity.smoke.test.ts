@@ -1,4 +1,4 @@
-// M6.c real-data parity smoke gate (Researcher v3 §B).
+// M6.c real-data parity smoke gate (Researcher v3 §B + R4.0.c).
 //
 // Sister to `native-parity.golden.test.ts` (the synthetic-fixture gate).
 // This file is **always skipped** unless `RUN_REAL_PARITY=1` is set —
@@ -6,8 +6,13 @@
 //   1. Discovers real Claude Code data via production `discoverJsonlFiles()`
 //      (honors CLAUDE_CONFIG_DIR / XDG_CONFIG_HOME / ~/.claude).
 //   2. Skips with a clear log if discovery yields nothing.
-//   3. Runs native via `runNative(...)` and ccusage via `runCcusage(...)
-//      --mode calculate` in parallel.
+//   3. Runs native via `runNative(...)` and ccusage via
+//      **`ccusage claude <cmd>`** (R4.0.c — per-source apples-to-apples;
+//      bare `ccusage` aggregates 15-agent default that native doesn't
+//      yet walk). The scope mismatch was the dominant residual drift
+//      after R4.0.a/b landed — see `r4-closure-trace.md#r4-0-c` +
+//      `r4-slip-plan.md#multi-agent-discovery` for the R5-deferral
+//      record.
 //   4. Compares totals + per-model + token + block-count within the
 //      §B.3 tolerance bands.
 //
@@ -16,17 +21,67 @@
 // by R2's hidden mistake of comparing native-implicit-calculate against
 // ccusage-default-auto. Apples-to-apples means same mode on both sides.
 //
-// Mirrors `Researcher v3 §B.4`'s assertion shape.
+// Mirrors `Researcher v3 §B.4`'s assertion shape; updated R4.0.c.
 
 import { describe, it, expect } from "vitest";
+import { spawn } from "node:child_process";
 import { runNative } from "../runner";
-import { runCcusage } from "../../ccusage-runner";
 import { discoverJsonlFiles } from "../paths";
 import type { UsageRecord, Block, ModelBreakdown } from "../../types";
 
 const RUN = process.env.RUN_REAL_PARITY === "1";
 const TZ = process.env.TZ ?? "UTC";
 const CCUSAGE_BIN = process.env.CCUSAGE_BIN ?? "ccusage";
+
+/**
+ * R4.0.c oracle helper. Calls `ccusage claude <cmd> --mode calculate
+ * --timezone <tz> --json` directly (bypasses `runCcusage` because its
+ * extraArgs ordering doesn't accommodate sub-source commands).
+ *
+ * Normalises the per-source field names back to the unified shape the
+ * smoke assertions consume:
+ *   - daily:   `date`  → `period`
+ *   - weekly:  `week`  → `period`
+ *   - monthly: `month` → `period`
+ *   - session/blocks: shape already compatible.
+ */
+async function ccusageClaudeOracle<T>(cmd: string): Promise<T> {
+  const args = ["claude", cmd, "--mode", "calculate", "--timezone", TZ, "--json"];
+  return new Promise<T>((resolve, reject) => {
+    const child = spawn(CCUSAGE_BIN, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch { /* */ }
+      reject(new Error(`ccusage claude ${cmd} timeout`));
+    }, 60_000);
+    child.stdout.on("data", (c) => { stdout += c.toString(); });
+    child.stderr.on("data", (c) => { stderr += c.toString(); });
+    child.on("error", (e) => { clearTimeout(timer); reject(e); });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(`ccusage claude ${cmd} exit ${code}: ${stderr.slice(0, 500)}`));
+        return;
+      }
+      try {
+        const parsed = JSON.parse(stdout) as Record<string, unknown>;
+        // R4.0.c — normalize per-source field names to the unified shape.
+        const key = cmd as "daily" | "weekly" | "monthly" | "session" | "blocks";
+        if (key === "daily" || key === "weekly" || key === "monthly") {
+          const rows = parsed[key] as Array<Record<string, unknown>>;
+          const periodKey = key === "daily" ? "date" : key === "weekly" ? "week" : "month";
+          for (const r of rows) {
+            if (r[periodKey] != null && r["period"] == null) r["period"] = r[periodKey];
+          }
+        }
+        resolve(parsed as T);
+      } catch (e) {
+        reject(new Error(`ccusage claude ${cmd} JSON parse: ${(e as Error).message}`));
+      }
+    });
+  });
+}
 
 // §B.3 — tolerance bands. The "OR larger window" pattern absorbs
 // small-absolute-value flakes (e.g. a $0.30 daily total looking 30 %
@@ -44,10 +99,7 @@ describe.skipIf(!RUN)("native vs ccusage --mode calculate · real ~/.claude pari
   it.skipIf(files.length === 0)("monthly totals match within ±2 % OR ±$0.50", async () => {
     const [native, oracle] = await Promise.all([
       runNative<{ monthly: UsageRecord[] }>("monthly", { tz: TZ, mode: "calculate" }),
-      runCcusage<{ monthly: UsageRecord[] }>("monthly", {
-        bin: CCUSAGE_BIN, timeoutMs: 60_000,
-        extraArgs: ["--mode", "calculate", "--timezone", TZ],
-      }),
+      ccusageClaudeOracle<{ monthly: UsageRecord[] }>("monthly"),
     ]);
     for (const ccRow of oracle.monthly) {
       const nRow = native.monthly.find((r) => r.period === ccRow.period);
@@ -62,10 +114,7 @@ describe.skipIf(!RUN)("native vs ccusage --mode calculate · real ~/.claude pari
   it.skipIf(files.length === 0)("daily totals match within ±2 % OR ±$0.50", async () => {
     const [native, oracle] = await Promise.all([
       runNative<{ daily: UsageRecord[] }>("daily", { tz: TZ, mode: "calculate" }),
-      runCcusage<{ daily: UsageRecord[] }>("daily", {
-        bin: CCUSAGE_BIN, timeoutMs: 60_000,
-        extraArgs: ["--mode", "calculate", "--timezone", TZ],
-      }),
+      ccusageClaudeOracle<{ daily: UsageRecord[] }>("daily"),
     ]);
     for (const ccRow of oracle.daily) {
       const nRow = native.daily.find((r) => r.period === ccRow.period);
@@ -80,10 +129,7 @@ describe.skipIf(!RUN)("native vs ccusage --mode calculate · real ~/.claude pari
   it.skipIf(files.length === 0)("per-model rows match within ±2 % OR ±$0.10", async () => {
     const [native, oracle] = await Promise.all([
       runNative<{ monthly: UsageRecord[] }>("monthly", { tz: TZ, mode: "calculate" }),
-      runCcusage<{ monthly: UsageRecord[] }>("monthly", {
-        bin: CCUSAGE_BIN, timeoutMs: 60_000,
-        extraArgs: ["--mode", "calculate", "--timezone", TZ],
-      }),
+      ccusageClaudeOracle<{ monthly: UsageRecord[] }>("monthly"),
     ]);
     for (const ccRow of oracle.monthly) {
       const nRow = native.monthly.find((r) => r.period === ccRow.period);
@@ -102,10 +148,7 @@ describe.skipIf(!RUN)("native vs ccusage --mode calculate · real ~/.claude pari
   it.skipIf(files.length === 0)("token totals match within ±0.1 % OR ±100 tokens", async () => {
     const [native, oracle] = await Promise.all([
       runNative<{ monthly: UsageRecord[] }>("monthly", { tz: TZ, mode: "calculate" }),
-      runCcusage<{ monthly: UsageRecord[] }>("monthly", {
-        bin: CCUSAGE_BIN, timeoutMs: 60_000,
-        extraArgs: ["--mode", "calculate", "--timezone", TZ],
-      }),
+      ccusageClaudeOracle<{ monthly: UsageRecord[] }>("monthly"),
     ]);
     for (const ccRow of oracle.monthly) {
       const nRow = native.monthly.find((r) => r.period === ccRow.period);
@@ -120,10 +163,7 @@ describe.skipIf(!RUN)("native vs ccusage --mode calculate · real ~/.claude pari
   it.skipIf(files.length === 0)("block count matches within ±5 % OR ±2 blocks", async () => {
     const [native, oracle] = await Promise.all([
       runNative<{ blocks: Block[] }>("blocks", { tz: TZ, mode: "calculate" }),
-      runCcusage<{ blocks: Block[] }>("blocks", {
-        bin: CCUSAGE_BIN, timeoutMs: 60_000,
-        extraArgs: ["--mode", "calculate", "--timezone", TZ],
-      }),
+      ccusageClaudeOracle<{ blocks: Block[] }>("blocks"),
     ]);
     const nCount = native.blocks.length;
     const cCount = oracle.blocks.length;
