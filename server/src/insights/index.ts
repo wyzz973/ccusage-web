@@ -23,3 +23,12 @@ export { computeSnapshotDeltas, previousPeriodKeys } from "./deltas.js";
 export type { SnapshotDeltas, CardDelta, DeltaInputs } from "./deltas.js";
 export { bucketHourly } from "./hourly.js";
 export type { HourlyBucket, HourlyInputs } from "./hourly.js";
+export { computeDetectedAgents } from "./detected-agents.js";
+export type { DetectedAgentsInputs } from "./detected-agents.js";
+export { computeBudgetInsight } from "./budget.js";
+export type { BudgetInsight, BudgetInputs } from "./budget.js";
+export {
+  shellPerAgent, PER_AGENT_BUDGET_MS,
+  type PerAgentStatus, type AgentResult,
+  type PerAgentSummary, type PerAgentTask, type ShellPerAgentOptions,
+} from "./per-agent.js";

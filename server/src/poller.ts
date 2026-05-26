@@ -7,6 +7,7 @@ import {
   getTodayKey, getMonthKey, getWeekStartKey,
   computeTodayDrivers, computeSnapshotDeltas, previousPeriodKeys,
   computeProjectRollups, computeCacheInsight, computeLimitResetInsight,
+  computeDetectedAgents, computeBudgetInsight,
   decodeProject,
   type DisplayNameSource,
 } from "./insights/index.js";
@@ -23,6 +24,13 @@ export interface PollerDeps {
    * Defaults to UTC if absent.
    */
   tz?: string;
+  /**
+   * M6.d (R3) — what gets stamped onto `derived.mode.parser`. The mode
+   * badge in the UI reads this field. `native` = in-tree loader is active;
+   * `fallback` = ccusage shellout (either explicit `USAGE_SOURCE=ccusage`
+   * or, post-M6.d-flip, the auto-fallback when soak-drift trips).
+   */
+  parserMode?: "native" | "fallback";
 }
 
 export interface Poller {
@@ -36,6 +44,8 @@ const ACTIVE_SESSION_WINDOW_MS = 30 * 60 * 1000;
 export interface ComputeDerivedDeps {
   /** IANA TZ; default UTC. */
   tz?: string;
+  /** M6.d (R3) — stamped onto `derived.mode.parser` for the UI badge. */
+  parserMode?: "native" | "fallback";
 }
 
 export function computeDerived(
@@ -116,6 +126,37 @@ export function computeDerived(
   // R2 D9 — limit-reset banner state.
   const limitReset = computeLimitResetInsight({ activeBlock, now });
 
+  // R3.5 — detected agents (drives AgentChipRow visibility client-side).
+  const detectedAgents = computeDetectedAgents({ sessionRecords: buckets.session });
+
+  // R3.7 — month-end projection (server emits facts, client applies cap policy).
+  // dayOfMonth/daysInMonth derived from the calendar parts in `tz` so the
+  // run-rate denominator agrees with the user's local rollover.
+  const monthCalParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(now);
+  const partVal = (t: string): number => {
+    const p = monthCalParts.find((x) => x.type === t);
+    return p ? Number(p.value) : 0;
+  };
+  const yNow = partVal("year");
+  const mNow = partVal("month");
+  const dNow = partVal("day");
+  // `new Date(Date.UTC(y, m, 0))` returns last day of month `m-1` —
+  // exactly the days-in-month for month index `m` (1-based). Works for
+  // leap years because the Date arithmetic handles Feb-29 itself.
+  const daysInMonth = new Date(Date.UTC(yNow, mNow, 0)).getUTCDate();
+  const budget = computeBudgetInsight({
+    dailyRecords: buckets.daily,
+    monthKey,
+    dayOfMonth: dNow,
+    daysInMonth,
+  });
+
+  // M6.d — parser mode for the UI badge. Default `fallback` so existing
+  // ccusage-shellout deploys keep the legacy badge until the native flip.
+  const mode: { parser: "native" | "fallback" } = { parser: deps.parserMode ?? "fallback" };
+
   return {
     today, week, month, allTime,
     activeBlock, activeSessionCount,
@@ -124,6 +165,9 @@ export function computeDerived(
     projects,
     cache,
     limitReset,
+    detectedAgents,
+    budget,
+    mode,
   };
 }
 
@@ -253,6 +297,7 @@ export function buildSessionProjectMap(deps: ProjectMapDeps = {}): SessionProjec
 export function createPoller(deps: PollerDeps): Poller {
   const now = deps.now ?? (() => new Date());
   const tz = deps.tz ?? "UTC";
+  const parserMode = deps.parserMode ?? "fallback";
   let timer: NodeJS.Timeout | null = null;
   let running = false;
 
@@ -288,7 +333,7 @@ export function createPoller(deps: PollerDeps): Poller {
         monthly: { records: buckets.monthly ?? [] },
         session: { records: buckets.session ?? [] },
         blocks:  { records: buckets.blocks ?? [] },
-        derived: computeDerived(buckets, now(), { tz }),
+        derived: computeDerived(buckets, now(), { tz, parserMode }),
       };
       deps.store.set(snap);
     } catch (err) {

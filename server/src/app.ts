@@ -50,6 +50,10 @@ export function buildApp(cfg: AppConfig) {
     getVersion: versionFn,
     intervalMs: cfg.pollIntervalMs,
     tz: cfg.tz,
+    // M6.d — stamp `derived.mode.parser` honestly from the active source.
+    // The UI's ModeBadgesV1 mounts off this; post-M6.d-flip auto-fallback
+    // will rewrite this string when soak-drift trips.
+    parserMode: useNative ? "native" : "fallback",
   });
   store.subscribe((snap: Snapshot) => hub.broadcast(snap));
 

@@ -89,6 +89,22 @@ export type Derived = {
     minutesUntilReset: number | null;
     source: "upstream" | "heuristic" | null;
   };
+  /** R3.5 — detected agents (spec-v3 §3.1.4). Drives AgentChipRow visibility. */
+  detectedAgents?: string[];
+  /** R3.7 — budget + projection (spec-v3 §3.3.1). */
+  budget?: {
+    monthToDateUSD: number;
+    monthEndProjectionUSD: number;
+    monthlyCapUSD: number | null;
+    overshootUSD: number | null;
+    overshootPct: number | null;
+    perBlockTokenLimit: number | null;
+    banner: boolean;
+  };
+  /** M6.d — parser-mode badge truth source (spec-v3 §2.3). */
+  mode?: {
+    parser: "native" | "fallback";
+  };
 };
 
 export type Snapshot = {

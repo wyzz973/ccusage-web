@@ -6,7 +6,7 @@ import { createSseHub } from "../sse-hub";
 import { createRoutes } from "../routes";
 import type { Snapshot, UsageRecord } from "../types";
 
-function snap(at: string, sessionRecords: UsageRecord[] = []): Snapshot {
+function snap(at: string, sessionRecords: UsageRecord[] = [], detectedAgents: string[] = []): Snapshot {
   return {
     generatedAt: at, ccusageVersion: "1.0.0",
     daily:   { records: [] }, weekly:  { records: [] },
@@ -16,22 +16,30 @@ function snap(at: string, sessionRecords: UsageRecord[] = []): Snapshot {
       today:   { tokens: 0, cost: 0 }, week:    { tokens: 0, cost: 0 },
       month:   { tokens: 0, cost: 0 }, allTime: { tokens: 0, cost: 0 },
       activeBlock: null, activeSessionCount: 0,
+      detectedAgents,
     },
   };
 }
 
-function sess(lastActivity: string, cost: number): UsageRecord {
+function sess(lastActivity: string, cost: number, agent = "claude", tokens = 0): UsageRecord {
   return {
-    period: `sess-${lastActivity}`, agent: "claude",
-    totalTokens: 0, totalCost: cost,
+    period: `sess-${lastActivity}-${agent}`, agent,
+    totalTokens: tokens, totalCost: cost,
     inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0,
     modelsUsed: [], modelBreakdowns: [], metadata: { lastActivity },
   };
 }
 
-function makeApp(opts: { runOnce?: () => Promise<void>; populated?: boolean; sessionRecords?: UsageRecord[]; tz?: string }) {
+function makeApp(opts: {
+  runOnce?: () => Promise<void>;
+  populated?: boolean;
+  sessionRecords?: UsageRecord[];
+  detectedAgents?: string[];
+  tz?: string;
+  perAgentBudgetMs?: number;
+}) {
   const store = createSnapshotStore();
-  if (opts.populated) store.set(snap("2026-05-24T10:00:00Z", opts.sessionRecords ?? []));
+  if (opts.populated) store.set(snap("2026-05-24T10:00:00Z", opts.sessionRecords ?? [], opts.detectedAgents ?? []));
   const hub = createSseHub();
   const app = express();
   app.use(express.json());
@@ -39,6 +47,7 @@ function makeApp(opts: { runOnce?: () => Promise<void>; populated?: boolean; ses
     store, hub,
     refresh: opts.runOnce ?? (async () => {}),
     tz: opts.tz,
+    perAgentBudgetMs: opts.perAgentBudgetMs,
   }));
   return { app, store, hub };
 }
@@ -127,6 +136,61 @@ describe("routes", () => {
       const { app } = makeApp({});
       const res = await request(app).get("/api/usage/hourly?date=2026-05-25&tz=UTC");
       expect(res.status).toBe(503);
+    });
+  });
+
+  // R3.6: lazy per-agent rollup.
+  describe("GET /api/per-agent", () => {
+    it("returns the empty-success shape when no agents are detected", async () => {
+      const { app } = makeApp({ populated: true });
+      const res = await request(app).get("/api/per-agent?date=2026-05-25&tz=UTC");
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("ok");
+      expect(res.body.succeeded).toEqual([]);
+      expect(res.body.failed).toEqual([]);
+      expect(res.body.timedOut).toEqual([]);
+      expect(res.body.budgetMs).toBe(800); // spec-v3 §1.4 default
+    });
+
+    it("fans out per detected agent and aggregates today's sessions", async () => {
+      const { app } = makeApp({
+        populated: true,
+        sessionRecords: [
+          sess("2026-05-25T10:00:00Z", 1.5, "claude", 100),
+          sess("2026-05-25T11:00:00Z", 2.5, "claude", 200),
+          sess("2026-05-25T12:00:00Z", 3.0, "codex",  300),
+          sess("2026-05-24T10:00:00Z", 99,  "claude", 999), // wrong day → excluded
+        ],
+        detectedAgents: ["claude", "codex"],
+      });
+      const res = await request(app).get("/api/per-agent?date=2026-05-25&tz=UTC");
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe("ok");
+      expect(res.body.succeeded).toHaveLength(2);
+      const claude = res.body.succeeded.find((s: { agent: string }) => s.agent === "claude");
+      const codex  = res.body.succeeded.find((s: { agent: string }) => s.agent === "codex");
+      expect(claude.data).toEqual({ totalCostUSD: 4.0, totalTokens: 300, sessionCount: 2 });
+      expect(codex.data).toEqual({ totalCostUSD: 3.0, totalTokens: 300, sessionCount: 1 });
+    });
+
+    it("returns 400 for an invalid date shape", async () => {
+      const { app } = makeApp({ populated: true });
+      const res = await request(app).get("/api/per-agent?date=bogus&tz=UTC");
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 503 when snapshot isn't ready", async () => {
+      const { app } = makeApp({});
+      const res = await request(app).get("/api/per-agent?date=2026-05-25&tz=UTC");
+      expect(res.status).toBe(503);
+    });
+
+    it("falls back to today + fallback tz when query params are omitted", async () => {
+      const { app } = makeApp({ populated: true, tz: "UTC" });
+      const res = await request(app).get("/api/per-agent");
+      expect(res.status).toBe(200);
+      expect(res.body.tz).toBe("UTC");
+      expect(res.body.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     });
   });
 
