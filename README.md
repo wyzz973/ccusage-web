@@ -78,6 +78,38 @@ npm run dev --workspace=web      # http://localhost:5173 (proxies /api → 47821
 
 Tests: `npm test`.
 
+## MCP server (R3.4)
+
+The server also exposes its snapshot as an MCP (Model Context Protocol)
+adapter over stdio:
+
+```bash
+npm run mcp --workspace=server
+```
+
+This starts an in-process poller (no HTTP server) and accepts
+line-delimited JSON-RPC 2.0 requests on stdin. Tools: `daily`, `weekly`,
+`monthly`, `session`, `blocks`. Methods: `initialize`, `ping`,
+`tools/list`, `tools/call`. Environment knobs (`USAGE_SOURCE`,
+`CCUSAGE_BIN`, `CCUSAGE_TIMEOUT_MS`, `POLL_INTERVAL_MS`, `TZ`) match
+the HTTP server's, so MCP + HTTP read the same data the same way.
+
+## Config files (R3.9–R3.12)
+
+Optional JSON config; priority chain (highest → lowest):
+
+1. CLI `--config <path>` (passed through to ccusage; surfaced as
+   `mergedFrom[0]` on `/api/health`)
+2. `CCUSAGE_CONFIG` env var
+3. `.ccusage/ccusage.json` in any cwd ancestor (stops at homedir)
+4. `~/.config/claude/ccusage.json`
+5. `~/.claude/ccusage.json`
+
+Keys: `tokenLimit`, `monthlyCapUSD`, `perBlockTokenLimit`,
+`startOfWeek` (monday..sunday), `order` (asc|desc), `costMode`
+(calculate|auto|display), `timezone` (IANA), `$schema` (ignored —
+IDE-autocomplete pointer). Schema served at `GET /api/config-schema`.
+
 ## Notes
 
 - The dashboard is **read-only**. ccusage's local log directories are bind-mounted **read-only**.

@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
+    "mcp": "tsx src/mcp/run.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
