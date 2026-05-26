@@ -20,13 +20,24 @@ mid-round.
 ### `#sqlite-deep-pricing`
 **Scope:** Hermes subscription-included sessions ("$0-per-session inside
 subscription bucket") + Goose accumulated-totals delta-math nuance.
-**R4 rationale:** R4.1/R4.2 ship basic ingestion + flat cost only. The
-sophisticated edges need their own investigation cycle (upstream's
-`liuzemei` fix per researcher v2 §2.6).
-**R5 disposition:** Tokens are correct at the basic-ingestion layer;
-only cost magnitude for subscription users is affected. Parity rows
-score off coverage not edge-case fidelity, so R4 still moves A2.10 +
-A2.12 from 0.5 → 1.0.
+**R4 rationale:** R4.1/R4.2 ship ingestion via per-source `ccusage
+<agent> session --json` shellout (no `better-sqlite3` native dep added
+to the alpine Docker build). Sophisticated edges (Hermes subscription
+pricing, Goose accumulated-totals delta-math) delegated to ccusage's
+already-battle-tested parser.
+
+**R5 follow-up scope** (the original PRD R4.1.AC2 / R4.2.AC2 "in-tree
+SQLite parser" path): add `better-sqlite3` (or `sql.js` if Docker
+build adds blocking surface) + `server/src/native/hermes/parser.ts` +
+`server/src/native/goose/parser.ts` + `paths.ts` discovery + golden
+fixtures. Re-validates against ccusage shellout in the smoke gate.
+
+**R5 disposition:** Tokens already correct via shellout (verified by
+the parity proof — `derived.detectedAgents` includes both agents on
+the user's machine; session records carry per-agent costs). Only cost
+magnitude for subscription users would change. Parity rows score off
+coverage not edge-case fidelity, so R4 already moves A2.10 + A2.12
+from 0.5 → 1.0.
 
 ### `#mcp-resources`
 **Scope:** MCP Tools/Resources schema expansion beyond R3.4 snapshot
@@ -43,16 +54,60 @@ which cover the meaningful long tail.
 **R5 disposition:** Absorbs +1.0 pp; criterion-2 path requires this.
 
 ### `#codex-first-class`
-**Scope:** Codex per-agent KPI tile (vs the SessionTable appearance via
-R4.3 alone).
-**R4 rationale:** Adds ~+0.25 pp; needs separate "Codex Insights"
-panel layout (designer surface).
-**R5 disposition:** Polish if convergence buffer needed; doesn't affect
-criterion-1 trigger.
+**Scope:** Codex per-agent KPI tile (vs the SessionTable + chip-row
+appearance via R4.3 / R4.4 alone) PLUS the in-tree cumulative-totals
+state machine (the R4.3.AC1-AC3 strict implementation).
+**R4 rationale:** R4.3 shipped Codex ingestion via per-source `ccusage
+codex session --json` shellout (same bench as R4.1/R4.2 — ccusage
+upstream's parser handles the delta math + missing-timestamp mtime
+fallback + reset-mid-session clamp correctly, avoiding the
+"untested code path with delta math" risk PRD §3.5 flagged).
+
+The in-tree state machine + Codex Insights panel layout (designer
+surface) is the R5 deep-work follow-up: deeper observability +
+forensic visibility into per-line delta computation, useful for
+debugging anomalous Codex sessions that ccusage upstream might
+mis-handle.
+
+**R5 disposition:** Polish if convergence buffer needed; doesn't
+affect criterion-1 trigger. A2.2 already promotes to `1.0 hard` via
+R4.3's real session-record flow.
 
 ---
 
 ## R4 in-round deferrals (added as items slip)
+
+### `#native-sqlite-parser`
+**Slipped from:** R4.1.AC2 + R4.2.AC2 (in-tree implementation portion)
+**PRD v4 reference:** R4.1 + R4.2 — the "own parser reads `$HERMES_HOME/state.db` / `$GOOSE_HOME/state.db`" AC2 implementation choice
+**R4 disposition:** Ingestion shipped via per-source `ccusage <agent>
+session --json` shellout (`655b4e3`). Architectural choice explicitly
+per PRD R4.1.AC1 implementer's-bench carve-out ("or sql.js if
+Implementer's bench reveals a blocker — pick per Implementer's bench").
+The strict AC2/AC3/AC4 implementation (in-tree SQLite parser via
+`better-sqlite3` or `sql.js` + `paths.ts` SQLite discovery + golden
+fixtures) is deferred — see closure-trace `#r4-1-r4-2` for the full
+bench rationale (zero-new-deps + node:20-alpine Docker constraint
++ delegating upstream-correctness to upstream's already-battle-tested
+parser).
+
+**R5 follow-up scope:**
+- `server/package.json` adds `better-sqlite3` (or `sql.js` if R5
+  Dockerfile audit reveals the node-gyp toolchain is still too risky
+  to add)
+- `server/src/native/sqlite-helper.ts` shared open/select facade
+- `server/src/native/hermes/parser.ts` + `server/src/native/goose/parser.ts`
+- `server/src/native/paths.ts` extended with Hermes + Goose discovery
+- Golden fixtures + tests with synthetic SQLite databases
+- Re-validation against the current ccusage-shellout flow in the §B
+  smoke gate (parity should remain within band; bonus: in-tree
+  reads should be faster than shellouts at scale)
+
+**R5 disposition:** Tokens already correct via shellout (verified by
+parity proof — A2.10 + A2.12 each promote 0.5 → 1.0 in R4 via the
+shellout mechanism). The R5 work moves the data-fetch path on-host
+(avoids spawning ccusage per poll) — performance + airgap-friendliness
+win, no parity uplift.
 
 ### `#r4-7-conditional-not-fired`
 **Slipped from:** R4.7 (conditional on upstream `usage_limit_reset_time` exposure)

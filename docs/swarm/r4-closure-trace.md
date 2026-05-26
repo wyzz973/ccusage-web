@@ -70,7 +70,7 @@ explicit rationale + lead escalation reference. No exceptions.
   2. Delegates the state-machine complexity (PRD §3.5 risk #3 "untested code path with delta math") to ccusage's battle-tested parser
   3. Achieves AC5's parity-proof observable end-state (`derived.detectedAgents.includes("codex")` + per-line `agent: "codex"` session records)
 
-The in-tree state machine remains R5 work; researcher §A.2 `#codex-first-class` slot is pre-allocated for the deeper per-agent KPI tile work. This commit closes the ingestion AC by shellout; the in-tree parser is the natural R5 follow-up when "Codex Insights" panel layout lands.
+**Per lead-clarification anchor (2026-05-26):** shipped via shellout to `ccusage codex` subprocess, NOT in-tree cumulative-totals state machine. Per PRD R4.3.AC1 same implementer's-bench rationale as R4.1+R4.2. The in-tree state machine deferred to **R5 `#codex-first-class` slot** (researcher §A.2 pre-allocated) for the deeper per-agent KPI tile work + native cumulative-totals delta-math implementation. This commit closes the ingestion AC by shellout.
 
 ## R4.1 + R4.2 · Hermes + Goose ingestion via per-source ccusage shellout
 
@@ -100,7 +100,7 @@ The in-tree state machine remains R5 work; researcher §A.2 `#codex-first-class`
   3. Achieves AC5 parity proof (detectedAgents + session records carry per-agent costs) by the same observable mechanism.
   4. Mirrors R3.4 MCP + R3.13 watch-CI patterns where in-tree wrappers around upstream behavior land lighter than reimplementations.
 
-In-tree SQLite parser stays as R5 work where it belongs (`r4-slip-plan.md#sqlite-deep-pricing` was pre-allocated for the deep edges; this commit closes the ingestion AC by shellout). The AC2/AC3/AC4-strict implementation (own parser + paths.ts SQLite discovery + own golden fixture) is the natural follow-up once the deep-pricing edges land.
+**Per lead-clarification anchor (2026-05-26):** shipped via shellout to `ccusage <agent>` subprocess, NOT in-tree SQLite parser. Per PRD R4.1.AC1 implementer's-bench carve-out. Native in-tree parsers deferred to **R5 `#native-sqlite-parser` slot** (`r4-slip-plan.md#native-sqlite-parser` — new slot for the AC2/AC3/AC4-strict implementation: `better-sqlite3` dep + `hermes/parser.ts` + `goose/parser.ts` + `paths.ts` discovery + golden fixtures). The pre-existing `#sqlite-deep-pricing` slot covers a different surface (Hermes subscription + Goose accumulated-totals edges).
 
 ## R4.9 + R4.6 + R4.5 (web) · agent-colors + Settings input + Debug link + id-prefix + Recent/All
 
