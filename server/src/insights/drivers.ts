@@ -18,7 +18,19 @@
 import type { UsageRecord } from "../types.js";
 
 export interface DriverSegment {
+  /**
+   * Canonical identity (used as the filter-chip value). For projects
+   * this is the encoded form `-Users-foo-bar`; for agents/models it's
+   * the raw label.
+   */
   name: string;
+  /**
+   * S-R3-1: human-facing label. UI consumers should render
+   * `displayName ?? name` so the project segment shows e.g.
+   * "ccusage-web" instead of "-Users-sd3-Desktop-project-ccusage-web".
+   * Optional because agents/models don't have a separate display form.
+   */
+  displayName?: string;
   pct: number; // 0–100, integer
   costUSD: number;
 }
@@ -44,6 +56,13 @@ export interface DriversInputs {
   todaysSessions?: Array<{
     agent?: string | undefined;
     project?: string | undefined;
+    /**
+     * S-R3-1: short-form display name carried from
+     * `UsageRecord.projectDisplay`. When present + non-empty, the
+     * project driver-segment's `displayName` is stamped from this so
+     * UI consumers render the cwd-sniffed label.
+     */
+    projectDisplay?: string | undefined;
     cost: number;
   }>;
 }
@@ -108,20 +127,41 @@ export function computeTodayDrivers(input: DriversInputs): TodayDrivers {
   let project: DriverSegment | undefined;
   if (input.todaysSessions && input.todaysSessions.length > 0) {
     const projTotals = new Map<string, number>();
+    // S-R3-1: capture the cwd-sourced display name per canonical so the
+    // top segment can carry it. First-non-empty wins (sessions should
+    // all agree once the cwd-sniff in R3.0 has stamped them).
+    const projDisplay = new Map<string, string>();
     for (const s of input.todaysSessions) {
       const name = s.project ?? "";
       if (name === "" || name === "unknown") continue;
       const c = Number.isFinite(s.cost) ? s.cost : 0;
       projTotals.set(name, (projTotals.get(name) ?? 0) + c);
+      if (s.projectDisplay && s.projectDisplay !== "" && !projDisplay.has(name)) {
+        projDisplay.set(name, s.projectDisplay);
+      }
     }
     if (projTotals.size > 0) {
       const projDenominator = Array.from(projTotals.values()).reduce((a, b) => a + b, 0);
       project = topSegment(projTotals, projDenominator);
+      if (project) {
+        const dn = projDisplay.get(project.name);
+        if (dn) project = { ...project, displayName: dn };
+      }
     }
   }
 
+  // S-R2-5 (R2 carryover) — when the agent dimension's numerator is
+  // session-derived (`realSessions.length > 0`) and the daily total
+  // includes upstream-aggregator deltas the sessions don't capture,
+  // `agent.costUSD` can exceed `totalCostUSD`. The displayed pct is
+  // already clamped (`topSegment`'s `Math.min(100, ...)`), but `costUSD`
+  // leaks the contract violation to downstream consumers (e.g. the
+  // statusline endpoint). Clamp to keep the contract honest. Per
+  // reviewer R2 §10.5 + R3 retro: implementer's choice between
+  // clamp-on-output vs field-rename-to-`topRolledCostUSD`; clamp wins
+  // for minimum-blast-radius (no UI contract change).
   const out: TodayDrivers = { totalCostUSD };
-  if (agent) out.agent = agent;
+  if (agent) out.agent = { ...agent, costUSD: Math.min(agent.costUSD, totalCostUSD) };
   if (model) out.model = model;
   if (project) out.project = project;
   return out;

@@ -330,6 +330,15 @@ function buildBlocks(perFile: FileBundle[], now: Date): Block[] {
       const isActive = now.getTime() >= start && now.getTime() < end;
       const lastActivity = inWindow[inWindow.length - 1]!.timestampMs;
       const models = Array.from(new Set(inWindow.map((e) => e.displayModel).filter((m): m is string => !!m)));
+      // R3.13 — pick the latest non-null `usageLimitResetTime` from
+      // entries in the window. Latest wins because Anthropic re-stamps
+      // the marker as the user keeps consuming inside the quota window.
+      let usageLimitResetTime: string | null = null;
+      for (const e of inWindow) {
+        if (typeof e.usageLimitResetTime === "string" && e.usageLimitResetTime !== "") {
+          usageLimitResetTime = e.usageLimitResetTime;
+        }
+      }
       blocks.push({
         id: `blk-${new Date(start).toISOString()}`,
         startTime: new Date(start).toISOString(),
@@ -347,6 +356,7 @@ function buildBlocks(perFile: FileBundle[], now: Date): Block[] {
           inputTokens: totals.input, outputTokens: totals.output,
           cacheCreationInputTokens: totals.cc, cacheReadInputTokens: totals.cr,
         },
+        usageLimitResetTime,
       });
     }
     cursor += BLOCK_MS;

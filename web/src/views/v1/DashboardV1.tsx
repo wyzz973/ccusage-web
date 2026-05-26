@@ -3,7 +3,10 @@ import { RefreshCw } from "lucide-react";
 import { LiveIndicator } from "@/components/LiveIndicator";
 import { useUsageStore } from "@/store/usage-store";
 import { fetchSnapshot, triggerRefresh } from "@/lib/api";
-import { connectSse } from "@/lib/sse";
+// Bonus #6 (R3.1 carryover from R2 §10.8): `sse.js` is lazy-loaded
+// inside the live-wiring `useEffect` (see below). The static import is
+// intentionally NOT here — that would re-add ~9.6 KB gz to the
+// initial-paint critical path.
 import { MetricCardV1 } from "./components/MetricCardV1";
 import { DriverStrip } from "./components/DriverStrip";
 import { ViewToggle } from "./components/ViewToggle";
@@ -85,12 +88,26 @@ export function DashboardV1({ skipLiveWiring = false, routeOverride }: Dashboard
   useEffect(() => {
     if (skipLiveWiring) return;
     fetchSnapshot().then((s) => useUsageStore.getState().setSnapshot(s)).catch(() => { /* */ });
-    return connectSse({
-      onSnapshot: (s) => useUsageStore.getState().setSnapshot(s),
-      onUpdate:   (s) => useUsageStore.getState().setSnapshot(s),
-      onError:    (msg, lastSuccessAt) => useUsageStore.getState().setError(msg, lastSuccessAt),
-      onStatus:   (st) => useUsageStore.getState().setStatus(st),
+    // Bonus #6: lazy-load sse.js so its ~9.6 KB gz stays off the
+    // initial-paint critical path. The sub-100ms connect delay after
+    // first render is invisible at the §3.3 Fast-4G throttle (the
+    // three-second-insight Playwright spec passes either way). Cleanup
+    // closure is captured in a local + returned synchronously.
+    let cleanup: (() => void) | undefined;
+    let cancelled = false;
+    void import("@/lib/sse").then(({ connectSse }) => {
+      if (cancelled) return;
+      cleanup = connectSse({
+        onSnapshot: (s) => useUsageStore.getState().setSnapshot(s),
+        onUpdate:   (s) => useUsageStore.getState().setSnapshot(s),
+        onError:    (msg, lastSuccessAt) => useUsageStore.getState().setError(msg, lastSuccessAt),
+        onStatus:   (st) => useUsageStore.getState().setStatus(st),
+      });
     });
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
   }, [skipLiveWiring]);
 
   const kpis = selectKpis(snap);

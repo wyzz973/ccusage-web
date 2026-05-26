@@ -59,6 +59,18 @@ export type Block = {
     cacheCreationInputTokens: number;
     cacheReadInputTokens: number;
   };
+  /**
+   * R3.13 — upstream `usage_limit_reset_time` (RFC3339 UTC) when the
+   * Anthropic API returns the `Claude AI usage limit reached|<unixts>`
+   * marker on a session line. Surfaces as `derived.activeBlock.usageLimitResetTime`;
+   * D9 LimitResetBanner reads it for its `source: "upstream"` path.
+   *
+   * `null` = field absent / malformed (banner falls back to the burn
+   * heuristic in `computeLimitResetInsight`). Both native + ccusage
+   * source paths populate this when upstream emits it; pre-upstream-land,
+   * value stays null and the heuristic carries.
+   */
+  usageLimitResetTime?: string | null;
 };
 
 export type Derived = {

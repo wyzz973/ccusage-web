@@ -97,7 +97,9 @@ export function computeDerived(
     // M-A3 (R1.5): pass through the session's `agent` so computeTodayDrivers
     // can build a real per-agent rollup (sessions carry "claude"/"codex"
     // labels; daily records all say "all" — see review §M-A3).
-    .map((s) => ({ agent: s.agent, project: s.project, cost: s.totalCost }));
+    // S-R3-1 (R3.1): also carry `projectDisplay` so the driver-segment
+    // surfaces the short label instead of the canonical encoded path.
+    .map((s) => ({ agent: s.agent, project: s.project, projectDisplay: s.projectDisplay, cost: s.totalCost }));
 
   const todayDrivers = computeTodayDrivers({
     todaysDailyRecords,

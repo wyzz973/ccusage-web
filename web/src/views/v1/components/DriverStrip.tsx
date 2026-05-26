@@ -57,9 +57,12 @@ export function DriverStrip(props: DriverStripProps): JSX.Element {
       <span className="block text-[10px] uppercase tracking-wider text-muted-foreground mb-0.5">Driver of the day</span>
       <ul className="flex flex-row flex-wrap items-center gap-y-2 text-sm" role="list">
         {segments.map((s, i) => {
+          // S-R3-1: project segment renders the cwd-sniffed displayName
+          // when available (e.g. "ccusage-web"), falling back to the
+          // canonical (encoded `-Users-…` form) only if absent.
           const label = s.kind === "agent"
             ? agentLabel(s.seg.name)
-            : s.seg.name;
+            : (s.seg.displayName ?? s.seg.name);
           return (
             <li key={s.kind} className="contents">
               {i > 0 && <span className="mx-3 text-muted-foreground/50" aria-hidden="true">·</span>}

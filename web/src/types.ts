@@ -44,7 +44,13 @@ export type Block = {
   };
 };
 
-export type DriverSegment = { name: string; pct: number; costUSD: number };
+/**
+ * S-R3-1: `displayName` carries the cwd-sniffed short label for the
+ * project dimension. UI renders `displayName ?? name` so the segment
+ * shows "ccusage-web" instead of "-Users-sd3-Desktop-project-ccusage-web".
+ * Optional because agents/models don't have a separate display form.
+ */
+export type DriverSegment = { name: string; displayName?: string; pct: number; costUSD: number };
 
 export type Derived = {
   today:   { tokens: number; cost: number };

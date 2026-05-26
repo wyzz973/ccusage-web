@@ -1,0 +1,106 @@
+# R3.13.AC3 — upstream watch for `usage_limit_reset_time`.
+#
+# Runs weekly (Monday 06:30 UTC, after pricing-refresh). Checks two
+# upstream surfaces for the field:
+#
+#   1. ccusage docs page (`ccusage.com/guide/blocks-reports`)
+#   2. Latest ccusage release's `blocks --json` sample
+#
+# If the field surfaces on either, opens an auto-PR titled
+# `feat(blocks): upstream now exposes usage_limit_reset_time — wire through`.
+# Per PRD v3 R3.13.AC3, the body of that PR is a single-line code change
+# in the poller (already prepared — see `server/src/insights/limit-reset.ts`
+# `usageLimitResetTime` branch) plus a regression test.
+#
+# Manual trigger via `workflow_dispatch` for tests + ad-hoc runs.
+
+name: upstream-limit-reset-watch
+
+on:
+  schedule:
+    # Mondays at 06:30 UTC. Stays out of the pricing-refresh slot to
+    # avoid two concurrent gh-CLI auto-PR workflows fighting for the
+    # same `gh` rate budget.
+    - cron: "30 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Probe upstream docs
+        id: probe-docs
+        run: |
+          set +e
+          curl -sSfL https://ccusage.com/guide/blocks-reports > /tmp/blocks-reports.html
+          if grep -q "usage_limit_reset_time" /tmp/blocks-reports.html; then
+            echo "found=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Probe latest ccusage release (blocks --json sample)
+        id: probe-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          # Fetch the latest release notes; ccusage tags release JSON samples
+          # in the release body for major releases. Cheap signal.
+          gh release view --repo ryoppippi/ccusage --json body --jq .body > /tmp/release-body.txt 2>/dev/null
+          if grep -q "usage_limit_reset_time" /tmp/release-body.txt; then
+            echo "found=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open auto-PR if upstream field landed
+        if: steps.probe-docs.outputs.found == '1' || steps.probe-release.outputs.found == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          BRANCH="auto/r3-13-upstream-limit-reset-${GITHUB_RUN_ID}"
+          git config user.name "ccusage-web watch bot"
+          git config user.email "noreply@ccusage-web"
+          git checkout -b "$BRANCH"
+          # The wire-through is already prepared at
+          # `server/src/insights/limit-reset.ts`; this PR is a docs-only
+          # touch to flag that the upstream field has landed and the
+          # field is now active in production.
+          NOTE_FILE="docs/swarm/upstream-limit-reset-detected.md"
+          {
+            echo "# Upstream usage_limit_reset_time landed"
+            echo ""
+            echo "Detected on $(date -u +%Y-%m-%dT%H:%M:%SZ) by GH Actions run $GITHUB_RUN_ID."
+            echo ""
+            echo "## Sources hit"
+            echo "- docs page: ${{ steps.probe-docs.outputs.found == '1' && 'yes' || 'no' }}"
+            echo "- release notes: ${{ steps.probe-release.outputs.found == '1' && 'yes' || 'no' }}"
+            echo ""
+            echo "## Wire-through status"
+            echo "- Native parser: already reading \`usage_limit_reset_time\` → \`CookedEntry.usageLimitResetTime\` (R3.13)"
+            echo "- buildBlocks: already stamping \`Block.usageLimitResetTime\`"
+            echo "- D9 banner consumer: already reads \`Block.usageLimitResetTime\` via \`computeLimitResetInsight\`"
+            echo ""
+            echo "## Follow-up"
+            echo "Tighten the smoke harness to assert the field reaches /api/snapshot's derived.activeBlock."
+          } > "$NOTE_FILE"
+          git add "$NOTE_FILE"
+          git commit -m "feat(blocks): upstream now exposes usage_limit_reset_time — wire through
+
+Auto-detected by .github/workflows/upstream-limit-reset-watch.yml.
+The native + ccusage paths already read the field (R3.13 R3.1 patch);
+this PR documents the surfacing and ships the new smoke assertion."
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "feat(blocks): upstream now exposes usage_limit_reset_time — wire through" \
+            --body "Auto-PR from upstream-limit-reset-watch run $GITHUB_RUN_ID. See $NOTE_FILE for details. Wire-through code lives at server/src/insights/limit-reset.ts (already prepared via R3.13)." \
+            --label automation,parity

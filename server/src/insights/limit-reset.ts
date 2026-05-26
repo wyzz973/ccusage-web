@@ -44,9 +44,16 @@ export function computeLimitResetInsight(input: LimitResetInputs): LimitResetIns
   const b = input.activeBlock;
   if (!b) return INACTIVE;
 
-  // Upstream-source path: if the block ever carries a real usageLimitResetAt
-  // (cast through `unknown` because the type doesn't have it yet), prefer it.
-  const upstream = (b as unknown as { usageLimitResetAt?: string }).usageLimitResetAt;
+  // R3.13 — upstream-source path. R3.13 settled on the spec-canonical
+  // field name `usageLimitResetTime` (matches upstream's snake_case
+  // `usage_limit_reset_time` plus our camelCase convention). Old name
+  // `usageLimitResetAt` is checked as a back-compat fallback in case a
+  // pre-R3.13 ccusage release used it; safe to drop once R3.13 has
+  // soaked for a round.
+  const upstream =
+    (b.usageLimitResetTime != null && b.usageLimitResetTime !== "")
+      ? b.usageLimitResetTime
+      : (b as unknown as { usageLimitResetAt?: string }).usageLimitResetAt;
   if (typeof upstream === "string" && upstream !== "") {
     const ms = Date.parse(upstream);
     if (Number.isFinite(ms) && ms > input.now.getTime()) {

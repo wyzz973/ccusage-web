@@ -66,6 +66,15 @@ export interface RawUsageEntry {
       speed?: "standard" | "fast";
     };
   };
+  /**
+   * R3.13 — upstream `usage_limit_reset_time` (snake_case mirrors
+   * ccusage upstream's naming convention). Absent in current
+   * production lines; appears once ccusage 20.x ships the field. Watch
+   * CI workflow at `.github/workflows/upstream-limit-reset-watch.yml`
+   * opens an auto-PR when the field surfaces — the wire-through here
+   * makes the auto-PR a single regression-test change.
+   */
+  usage_limit_reset_time?: string | null;
 }
 
 /** Cooked entry, after validation, dedup, cost calc. */
@@ -117,6 +126,13 @@ export interface CookedEntry {
    * options if they want project attribution.
    */
   filePath?: string;
+  /**
+   * R3.13 — RFC3339 UTC reset timestamp from upstream's
+   * `usage_limit_reset_time`. `undefined` = field absent on the line;
+   * `null` = present-but-malformed (drops with `console.warn`).
+   * Propagated by `buildBlocks` onto `Block.usageLimitResetTime`.
+   */
+  usageLimitResetTime?: string | null;
 }
 
 /** Returns true if line contains `:null` for any forbidden field name. */
@@ -194,6 +210,23 @@ export function parseLine(line: string, pricing: PricingFinder, opts: ParseLineO
   const cc = u.cache_creation_input_tokens ?? 0;
   const cr = u.cache_read_input_tokens ?? 0;
 
+  // R3.13 — upstream limit-reset wire-through. Defensive: accept the
+  // field only if it parses to a finite RFC3339 timestamp; null/absent
+  // both surface as `undefined` so the heuristic carries.
+  let usageLimitResetTime: string | null | undefined;
+  if (raw.usage_limit_reset_time === null) {
+    usageLimitResetTime = null;
+  } else if (typeof raw.usage_limit_reset_time === "string" && raw.usage_limit_reset_time !== "") {
+    const ms = Date.parse(raw.usage_limit_reset_time);
+    if (Number.isFinite(ms)) {
+      // Normalize to ISO-UTC so consumers don't have to re-parse.
+      usageLimitResetTime = new Date(ms).toISOString();
+    } else {
+      console.warn(`[ccusage-web/native] malformed usage_limit_reset_time ${JSON.stringify(raw.usage_limit_reset_time)}; treating as absent`);
+      usageLimitResetTime = null;
+    }
+  }
+
   return {
     timestamp: raw.timestamp,
     timestampMs: tsMs,
@@ -213,6 +246,7 @@ export function parseLine(line: string, pricing: PricingFinder, opts: ParseLineO
     rawCostUSD: raw.costUSD,
     cwd: typeof raw.cwd === "string" && raw.cwd.trim() !== "" ? raw.cwd : undefined,
     filePath: opts.filePath,
+    usageLimitResetTime,
   };
 }
 
