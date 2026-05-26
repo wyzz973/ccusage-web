@@ -90,7 +90,9 @@ export async function runNative<T = unknown>(
     case "session":
       return { session: bucketBySession(perFile) } as T;
     case "blocks":
-      return { blocks: buildBlocks(perFile, now) } as T;
+      // R4.0.a (Researcher v4 §B.1) — `tz` is now threaded so blocks
+      // floor to user-local hour (matches ccusage's `identify_session_blocks`).
+      return { blocks: buildBlocks(perFile, now, tz) } as T;
     default:
       throw new Error(`runNative: unsupported command "${cmd}"`);
   }
@@ -279,89 +281,175 @@ function bucketBySession(perFile: FileBundle[]): UsageRecord[] {
   return out;
 }
 
-function buildBlocks(perFile: FileBundle[], now: Date): Block[] {
-  // 5h windows anchored to the earliest entry's hour. Simple Phase-1 model.
+/**
+ * R4.0.a — port of `identify_session_blocks` from ccusage upstream
+ * (`blocks.rs:15-65`, pseudocode in iter0-R1 §5 / Researcher v4 §B.1).
+ *
+ * The pre-R4 implementation was a fixed UTC 5h grid with gap-filler
+ * windows — produced 3.07× the block count of ccusage (608 vs 198
+ * against the 4-month real `~/.claude` dataset). Two distinct
+ * divergences from upstream:
+ *
+ *   1. Anchored to UTC hour (`setUTCMinutes(0,0,0)`), not user-local
+ *      hour. `bucketByDay`/`Week`/`Month` already honor `tz`; only
+ *      `buildBlocks` was missing the threading.
+ *   2. Fixed 5h grid + gap-window-per-empty-cell, vs. ccusage's
+ *      cluster-and-gap: a new block starts when an entry is > 5h from
+ *      either the current block's start OR the previous entry —
+ *      whichever fires first. Gap blocks ONLY emit when consecutive
+ *      entries are > 5h apart (one big quiet weekend = one gap block,
+ *      not a sequence of empty grid windows).
+ *
+ * Behaviour preserved verbatim from pre-R4:
+ *   - Active block detection (`now ∈ [start, start+5h)` AND last
+ *     activity within 5h of now)
+ *   - R3.13 `usageLimitResetTime` propagation (latest-non-null wins)
+ *   - Burn-rate / projection only on the active block
+ */
+function buildBlocks(perFile: FileBundle[], now: Date, tz: string): Block[] {
   const all: CookedEntry[] = [];
   for (const fb of perFile) all.push(...fb.result.entries);
   if (all.length === 0) return [];
   all.sort((a, b) => a.timestampMs - b.timestampMs);
 
-  // Floor to the hour for the first window's start.
-  const firstMs = all[0]!.timestampMs;
-  const firstHour = new Date(firstMs);
-  firstHour.setUTCMinutes(0, 0, 0);
-  let cursor = firstHour.getTime();
+  // Cluster the entries: each cluster starts at `floor_to_hour(entry.t)`
+  // in user-local TZ. A new cluster begins when an entry is > BLOCK_MS
+  // from EITHER the cluster start OR the previous entry. Gap blocks
+  // are inserted between two real clusters when the last-entry-to-next
+  // -entry gap is > BLOCK_MS.
+  interface Cluster { start: number; entries: CookedEntry[] }
+  const clusters: Cluster[] = [];
+  const gapStarts: number[] = []; // index in `clusters` array AFTER which a gap was triggered
+  let cur: Cluster | null = null;
 
+  for (const e of all) {
+    if (cur === null) {
+      cur = { start: floorToTzHour(e.timestampMs, tz), entries: [e] };
+      continue;
+    }
+    const lastT = cur.entries[cur.entries.length - 1]!.timestampMs;
+    const exceedsStart = (e.timestampMs - cur.start) > BLOCK_MS;
+    const exceedsLast  = (e.timestampMs - lastT)    > BLOCK_MS;
+    if (exceedsStart || exceedsLast) {
+      clusters.push(cur);
+      if (exceedsLast) gapStarts.push(clusters.length - 1);
+      cur = { start: floorToTzHour(e.timestampMs, tz), entries: [e] };
+    } else {
+      cur.entries.push(e);
+    }
+  }
+  if (cur) clusters.push(cur);
+
+  // Emit blocks + gap-blocks in chronological order. Each cluster
+  // becomes a real block; for each gap-flagged transition we also
+  // emit a gap block between the two real ones.
   const blocks: Block[] = [];
-  let idx = 0;
-  while (cursor <= now.getTime() + BLOCK_MS) {
-    const start = cursor;
-    const end = cursor + BLOCK_MS;
-    const inWindow: CookedEntry[] = [];
-    while (idx < all.length && all[idx]!.timestampMs < end) {
-      if (all[idx]!.timestampMs >= start) inWindow.push(all[idx]!);
-      idx++;
+  const gapSet = new Set(gapStarts);
+  for (let i = 0; i < clusters.length; i++) {
+    const c = clusters[i]!;
+    blocks.push(toRealBlock(c, now));
+    if (gapSet.has(i) && i + 1 < clusters.length) {
+      const lastT  = c.entries[c.entries.length - 1]!.timestampMs;
+      const nextT0 = clusters[i + 1]!.entries[0]!.timestampMs;
+      blocks.push(toGapBlock(lastT + BLOCK_MS, nextT0));
     }
-    if (inWindow.length === 0 && cursor + BLOCK_MS < now.getTime()) {
-      // Gap window — mark and skip.
-      blocks.push({
-        id: `gap-${new Date(start).toISOString()}`,
-        startTime: new Date(start).toISOString(),
-        endTime: new Date(end).toISOString(),
-        actualEndTime: null,
-        isActive: false,
-        isGap: true,
-        costUSD: 0, totalTokens: 0, entries: 0,
-        models: [], burnRate: null, projection: null,
-        tokenCounts: {
-          inputTokens: 0, outputTokens: 0,
-          cacheCreationInputTokens: 0, cacheReadInputTokens: 0,
-        },
-      });
-    } else if (inWindow.length > 0) {
-      const totals = inWindow.reduce((acc, e) => ({
-        cost: acc.cost + e.costUSD,
-        tokens: acc.tokens + e.totalTokens,
-        input: acc.input + e.inputTokens,
-        output: acc.output + e.outputTokens,
-        cc: acc.cc + e.cacheCreationInputTokens,
-        cr: acc.cr + e.cacheReadInputTokens,
-      }), { cost: 0, tokens: 0, input: 0, output: 0, cc: 0, cr: 0 });
-      const isActive = now.getTime() >= start && now.getTime() < end;
-      const lastActivity = inWindow[inWindow.length - 1]!.timestampMs;
-      const models = Array.from(new Set(inWindow.map((e) => e.displayModel).filter((m): m is string => !!m)));
-      // R3.13 — pick the latest non-null `usageLimitResetTime` from
-      // entries in the window. Latest wins because Anthropic re-stamps
-      // the marker as the user keeps consuming inside the quota window.
-      let usageLimitResetTime: string | null = null;
-      for (const e of inWindow) {
-        if (typeof e.usageLimitResetTime === "string" && e.usageLimitResetTime !== "") {
-          usageLimitResetTime = e.usageLimitResetTime;
-        }
-      }
-      blocks.push({
-        id: `blk-${new Date(start).toISOString()}`,
-        startTime: new Date(start).toISOString(),
-        endTime: new Date(end).toISOString(),
-        actualEndTime: isActive ? null : new Date(lastActivity).toISOString(),
-        isActive,
-        isGap: false,
-        costUSD: totals.cost,
-        totalTokens: totals.tokens,
-        entries: inWindow.length,
-        models,
-        burnRate: isActive ? burnRateFor(totals, start, now.getTime()) : null,
-        projection: isActive ? projectionFor(totals, start, end, now.getTime()) : null,
-        tokenCounts: {
-          inputTokens: totals.input, outputTokens: totals.output,
-          cacheCreationInputTokens: totals.cc, cacheReadInputTokens: totals.cr,
-        },
-        usageLimitResetTime,
-      });
-    }
-    cursor += BLOCK_MS;
   }
   return blocks;
+}
+
+function toRealBlock(c: { start: number; entries: CookedEntry[] }, now: Date): Block {
+  const inWindow = c.entries;
+  const totals = inWindow.reduce((acc, e) => ({
+    cost: acc.cost + e.costUSD,
+    tokens: acc.tokens + e.totalTokens,
+    input: acc.input + e.inputTokens,
+    output: acc.output + e.outputTokens,
+    cc: acc.cc + e.cacheCreationInputTokens,
+    cr: acc.cr + e.cacheReadInputTokens,
+  }), { cost: 0, tokens: 0, input: 0, output: 0, cc: 0, cr: 0 });
+  const start = c.start;
+  const end = start + BLOCK_MS;
+  const lastActivity = inWindow[inWindow.length - 1]!.timestampMs;
+  // R4.0.a — `is_active`: now within the block window AND last entry
+  // less than BLOCK_MS ago. Matches ccusage's `blocks.rs:90-95`.
+  const isActive = now.getTime() >= start && now.getTime() < end
+    && (now.getTime() - lastActivity) < BLOCK_MS;
+  const models = Array.from(new Set(inWindow.map((e) => e.displayModel).filter((m): m is string => !!m)));
+  // R3.13 — latest non-null `usageLimitResetTime` wins.
+  let usageLimitResetTime: string | null = null;
+  for (const e of inWindow) {
+    if (typeof e.usageLimitResetTime === "string" && e.usageLimitResetTime !== "") {
+      usageLimitResetTime = e.usageLimitResetTime;
+    }
+  }
+  return {
+    id: `blk-${new Date(start).toISOString()}`,
+    startTime: new Date(start).toISOString(),
+    endTime: new Date(end).toISOString(),
+    actualEndTime: isActive ? null : new Date(lastActivity).toISOString(),
+    isActive,
+    isGap: false,
+    costUSD: totals.cost,
+    totalTokens: totals.tokens,
+    entries: inWindow.length,
+    models,
+    burnRate: isActive ? burnRateFor(totals, start, now.getTime()) : null,
+    projection: isActive ? projectionFor(totals, start, end, now.getTime()) : null,
+    tokenCounts: {
+      inputTokens: totals.input, outputTokens: totals.output,
+      cacheCreationInputTokens: totals.cc, cacheReadInputTokens: totals.cr,
+    },
+    usageLimitResetTime,
+  };
+}
+
+function toGapBlock(startMs: number, endMs: number): Block {
+  return {
+    id: `gap-${new Date(startMs).toISOString()}`,
+    startTime: new Date(startMs).toISOString(),
+    endTime: new Date(endMs).toISOString(),
+    actualEndTime: null,
+    isActive: false,
+    isGap: true,
+    costUSD: 0, totalTokens: 0, entries: 0,
+    models: [],
+    burnRate: null,
+    projection: null,
+    tokenCounts: {
+      inputTokens: 0, outputTokens: 0,
+      cacheCreationInputTokens: 0, cacheReadInputTokens: 0,
+    },
+    usageLimitResetTime: null,
+  };
+}
+
+/**
+ * Floor a UTC ms timestamp to the start of its containing hour AS
+ * SEEN IN THE GIVEN TIMEZONE. Returns the UTC ms of that local hour
+ * boundary. Matches ccusage's `TimestampMs::floor_to_hour` semantics
+ * via `--timezone` (Researcher v4 §B.1 — closes the UTC-anchored
+ * divergence).
+ */
+function floorToTzHour(ms: number, tz: string): number {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(ms));
+  const get = (t: string): number => {
+    const p = parts.find((x) => x.type === t);
+    return p ? Number(p.value) : 0;
+  };
+  const localHourLocal = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), 0, 0);
+  // Compute the TZ offset at this instant (local-as-utc - actual-utc)
+  // and subtract it back to get the real UTC ms of the local-hour
+  // start. This is the canonical "interpret these calendar parts as
+  // belonging to tz" trick.
+  // Reconstruct the actual UTC ms that corresponds to these parts.
+  const localFullLocal = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+  const offsetMs = localFullLocal - ms; // ahead-of-UTC TZs return positive
+  return localHourLocal - offsetMs;
 }
 
 function burnRateFor(totals: { cost: number; tokens: number }, startMs: number, nowMs: number) {
