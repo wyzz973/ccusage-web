@@ -2,10 +2,14 @@
 
 Self-hosted live dashboard for [`ccusage`](https://github.com/ryoppippi/ccusage) — visualizes token usage and cost across all detected coding-agent CLIs (Claude Code, Codex, Gemini, Copilot, OpenClaw, …) with rolling-number animations driven by Server-Sent Events.
 
+Repo: <https://github.com/wyzz973/ccusage-web>
+
+![ccusage-web dashboard](docs/dashboard-viewport.png)
+
 ## Quick start
 
 ```bash
-git clone <this repo>
+git clone https://github.com/wyzz973/ccusage-web.git
 cd ccusage-web
 # Edit docker-compose.yml: comment out mounts for agents you don't use.
 docker compose up -d --build
