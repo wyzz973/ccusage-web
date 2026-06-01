@@ -18,4 +18,4 @@ services:
       - ${HOME}/.claude:/root/.claude:ro
       - ${HOME}/.codex:/root/.codex:ro
       - ${HOME}/.gemini:/root/.gemini:ro
-      - ${HOME}/.config/copilot:/root/.config/copilot:ro
+      # - ${HOME}/.config/copilot:/root/.config/copilot:ro  # uncomment if you use GitHub Copilot CLI
